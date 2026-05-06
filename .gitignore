@@ -52,3 +52,5 @@ rsconnect/
 *.csv
 flight_with_weather_2023.csv
 flight_with_weather_2024.csv
+
+.DS_Store
