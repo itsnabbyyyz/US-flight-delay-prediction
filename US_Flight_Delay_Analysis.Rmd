@@ -1,0 +1,698 @@
+---
+title: "Predicting US December Flight Delays Using R"
+author: "WQD7004 Group Project by Group 13"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_depth: 3
+    number_sections: false
+    code_folding: show
+    theme: flatly
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+# Global knitr options: show code, suppress messages/warnings in the rendered
+# report, cache the expensive data-ingestion step, and standardise figure size.
+knitr::opts_chunk$set(
+  echo       = TRUE,
+  message    = FALSE,
+  warning    = FALSE,
+  cache      = TRUE,
+  fig.width  = 8,
+  fig.height = 4.8,
+  fig.align  = "center",
+  dpi        = 96
+)
+```
+
+```{r libraries, cache=FALSE}
+# Load only the packages actually used in this report.
+library(tidyverse)   # data manipulation (dplyr, tidyr) and visualisation (ggplot2)
+library(data.table)  # fast reading of the very large (1.8 GB) source CSV files
+library(janitor)     # clean_names() for consistent snake_case column names
+library(skimr)       # rich one-line statistical summaries
+library(lubridate)   # date/time handling
+library(scales)      # axis formatting (commas, percentages)
+library(corrplot)    # correlation heatmaps
+library(patchwork)   # composing multiple ggplots
+library(knitr)       # kable() tables
+library(kableExtra)  # styled HTML tables
+
+
+theme_set(theme_minimal(base_size = 12) +
+            theme(panel.grid = element_blank()))
+report_fill <- "#2c7fb8"   # primary colour used throughout
+```
+
+```{css, echo=FALSE}
+p, li {
+  text-align: justify;
+  text-justify: inter-word;
+}
+```
+
+---
+
+# Phase 1: Introduction
+
+Flight delays remain a persistent challenge in the U.S. aviation industry, causing significant economic losses and passenger dissatisfaction. This project analyzes flight delay patterns using the **Aeolus dataset**, a comprehensive multi-modal dataset sourced from the U.S. Department of Transportation's Bureau of Transportation Statistics. The analysis focuses on domestic flights during December 2023 and December 2024, encompassing over 1.13 million flight records with rich operational, meteorological, and airport-level attributes.
+
+The project has two main analytical components. First, exploratory data analysis is conducted to understand delay patterns, weather impacts, and year-over-year trends. Second, predictive models are developed for two complementary tasks: a regression task to predict exact arrival delay in minutes, and a classification task to predict whether a flight will experience a significant delay exceeding 15 minutes. All analyses are implemented using the tidymodels framework in R.
+
+---
+
+## 1.1 Background
+
+Flight delays increase substantially during the December holiday season due to higher passenger demand, tighter flight schedules, and more frequent winter weather disruptions. These delays create operational challenges for airlines and airports, resulting in increased costs, resource constraints, and reduced service reliability. Understanding the factors that contribute to December flight delays, and how these factors vary across holiday seasons, can support more effective planning and delay mitigation strategies.
+
+The Aeolus dataset provides a comprehensive foundation for this analysis by combining flight operations, weather conditions, and airport information within a single dataset. This integration enables the joint examination of operational and environmental factors, allowing a more complete assessment of the drivers of flight delays.
+
+---
+
+## 1.2 Problem Statement
+
+Flight delays cost the U.S. economy billions of dollars annually, yet accurately predicting delays remains difficult due to the complex interaction of weather conditions, operational factors, airport congestion, and delay propagation across flight networks. During the December holiday travel season, the problem intensifies as flight volumes surge and weather disruptions become more frequent.
+
+Existing research has rarely compared regression and classification approaches on a unified dataset with integrated weather features. Furthermore, delay pattern changes between consecutive holiday seasons remain underexplored. This project addresses these gaps by leveraging the Aeolus dataset to simultaneously investigate both predictive paradigms while focusing specifically on December 2023 and 2024.
+
+---
+
+## 1.3 Objectives
+
+The objectives of this project are as follows:
+
+1. To perform data cleaning and preprocessing on the Aeolus dataset for both regression and classification tasks.
+2. To conduct exploratory data analysis characterizing flight delay patterns in December 2023 and December 2024.
+3. To develop a regression model predicting exact arrival delay (minutes) using operational, temporal, meteorological, and geospatial features.
+4. To develop a classification model predicting whether a flight will be delayed more than 15 minutes.
+5. To identify the most influential predictors of flight delays through feature importance analysis.
+6. To compare the performance of regression versus classification approaches for delay prediction.
+
+---
+
+## 1.4 Research Questions
+
+1. To what extent can weather conditions (temperature, precipitation, wind speed) predict flight arrival delays during December?
+2. How do flight delay patterns differ between December 2023 and December 2024?
+3. Which features (operational, temporal, meteorological, or geospatial) are the strongest predictors of arrival delay?
+4. How does a regression model compare to a classification model in predicting flight delays?
+5. Can a binary classification model accurately identify flights delayed more than 15 minutes?
+
+---
+
+# Phase 2: Data Preparation
+
+## 2.1 Data Source
+
+The dataset used in this project is titled Aeolus - A Multi-Modal Flight Delay Dataset. It originates from the U.S. Department of Transportation's Bureau of Transportation Statistics, which collects and publishes comprehensive data on domestic flight operations. The dataset covers domestic flights within the United States during the month of December for two consecutive years, specifically December 1–31, 2023 and December 1–31, 2024. This time period was selected to focus on the peak holiday travel season, allowing for comparative analysis of delay patterns between two holiday periods.
+
+## 2.2 Dataset Dimension
+
+```{r dataset-dimension}
+# December flight counts per year, with a bold total row.
+tibble(
+  Year                = c("December 2023", "December 2024", "Total"),
+  `Number of Flights` = c(558609, 574434, 1133043)
+) |>
+  kable(caption = "December flight records by year.",
+        format.args = list(big.mark = ","),
+        align = c("l", "r")) |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover")) |>
+  row_spec(3, bold = TRUE)
+```
+
+After filtering to December, the combined dataset comprises **1,133,043 rows** and
+**35 columns** (34 original variables plus an engineered `year` column).
+
+## 2.3 Variable Structure
+
+The 35 variables fall into six conceptual categories:
+
+```{r variable-structure}
+tibble(
+  Category = c("Flight Identification", "Temporal", "Delay / Operational",
+               "Weather (Origin)", "Weather (Destination)", "Geospatial"),
+  Variables = c(
+    "op_carrier, op_carrier_fl_num, origin, dest",
+    "fl_date, crs_dep_time, dep_time, crs_arr_time, arr_time, month, day_of_month, day_of_week",
+    "dep_delay, arr_delay, taxi_out, taxi_in, air_time, crs_elapsed_time, actual_elapsed_time, wheels_off, wheels_on, flights",
+    "o_temp, o_prcp, o_wspd",
+    "d_temp, d_prcp, d_wspd",
+    "o_latitude, o_longitude, d_latitude, d_longitude"
+  )
+) |>
+  kable(caption = "The 35 variables grouped into six conceptual categories.",
+        align = c("l", "l")) |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover")) |>
+  column_spec(1, bold = TRUE)
+```
+
+The **target variables** for modelling stage are `arr_delay` for regression and is_delayed (`arr_delay > 15`) minutes for classification.
+
+---
+
+## 2.4 Data Loading and Filtering
+
+```{r}
+  # load dataset file paths
+path_2023 <- 'flight_with_weather_2023.csv'
+path_2024 <- 'flight_with_weather_2024.csv'
+
+# read the data
+flight_2023 <- read_csv(path_2023)
+flight_2024 <- read_csv(path_2024)
+```
+
+File paths for the 2023 and 2024 datasets are first assigned to variables path_2023 and path_2024. The ```read_csv()``` function then reads each CSV file into R as a data frame.
+
+```{r}
+# inspect column names 2023
+names(flight_2023)
+```
+
+```{r}
+# inspect column names 2024
+names(flight_2024)
+```
+
+```{r}
+# verify both datasets have identical column names and order
+identical(names(flight_2023), names(flight_2024))
+```
+
+Column name inspection reveals 34 variables organized into flight identification, temporal data, delay metrics, weather conditions (origin/destination), and geospatial coordinates. The ```identical()``` function confirms both datasets have identical column names and ordering, validating that row-binding can proceed without alignment issues.
+
+```{r}
+# check unique values for MONTH column 2023 and 2024
+unique(flight_2023$MONTH)
+unique(flight_2024$MONTH)
+```
+
+The ```unique()``` function was applied to the MONTH column of the 2023 dataset to identify all distinct month values present. The output shows months 1 through 12, indicating that the 2023 dataset contains flight records from all twelve months of the year (January to December). 
+
+However, for year 2024, the output shows months 1, 2, and 4 through 12, but notably month 3 (March) is missing. This indicates that the 2024 dataset does not contain any flight records for March. The reason for this missing month could be due to data unavailability at the time of download or an intentional subset provided by the data source.
+
+```{r}
+# filter to only keep Dec rows 
+dec_flight_2023 <- flight_2023 %>%
+  filter(MONTH == 12) %>%
+  mutate(YEAR = 2023L)
+
+dec_flight_2024 <- flight_2024 %>%
+  filter(MONTH == 12) %>%
+  mutate(YEAR = 2024L)
+
+unique(dec_flight_2023$MONTH)
+unique(dec_flight_2024$MONTH)
+
+cat("December 2023:", nrow(dec_flight_2023), "flights\n")
+cat("December 2024:", nrow(dec_flight_2024), "flights\n")
+```
+
+The analysis is restricted to December flights to focus on the peak holiday travel period while reducing the dataset to a more manageable size. A YEAR variable is retained to enable direct comparisons between the 2023 and 2024 holiday seasons and to support subsequent temporal analyses.
+
+```{r}
+df <- bind_rows(dec_flight_2023, dec_flight_2024) %>%
+  janitor::clean_names()
+```
+
+The December 2023 and 2024 datasets were combined into a single dataset, and all variable names were standardized to a consistent naming convention. The resulting dataset contains 1,133,043 flight records and 35 variables, providing a unified foundation for subsequent cleaning, exploration, and modelling activities.
+
+## 2.5 Data Inspection
+
+### 2.5.1 Structure and Data Types
+
+```{r glimpse}
+glimpse(df)
+```
+
+```{r dtype-summary}
+# Tabulate how many columns fall into each broad data type.
+tibble(variable = names(df),
+       type     = map_chr(df, ~ class(.x)[1])) |>
+  mutate(type_group = case_when(
+    type %in% c("POSIXct", "Date", "IDate", "ITime") ~ "Datetime",
+    type %in% c("numeric", "integer", "double")      ~ "Numeric",
+    TRUE                                              ~ "Character")) |>
+  count(type_group, name = "n_columns") |>
+  kable(caption = "Number of columns by broad data type.") |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+The dataset is dominated by numerical flight and weather variables, with seven datetime fields and a small number of categorical identifiers. The datetime fields were successfully parsed, enabling temporal analysis and feature engineering. Preliminary inspection suggests that flights and month may be constant variables and should be examined further.
+
+### 2.5.2 Constant and Redundant Columns
+
+```{r constants}
+# Identify columns that carry no information
+df |>
+  summarise(across(everything(), n_distinct)) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "n_unique") |>
+  filter(n_unique <= 1) |>
+  kable(caption = "Constant columns (single unique value = zero predictive value).") |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+The variables month and flights contain only a single value across all observations and therefore provide no predictive information. These columns are retained during initial exploration for transparency but are removed during data cleaning to reduce unnecessary model complexity and ensure a more efficient modelling process.
+
+### 2.5.3 Numeric Summary
+
+```{r skim}
+# summary of df
+skim(df) |> yank("numeric")
+```
+
+The dataset is highly complete, with all core flight and delay variables fully populated. Missing values are limited to a small number of weather-related variables and are examined separately. Preliminary statistics also indicate that departure and arrival delays are strongly right-skewed, with most flights departing and arriving on time or early, but a small number experiencing extremely large delays. This distributional pattern has important implications for subsequent modelling and evaluation.
+
+---
+
+## 2.6 Data Cleaning
+
+### 2.6.1 Missing Values
+
+```{r missing-table}
+# check missing values
+missing_summary <- df |>
+  summarise(across(everything(), ~ sum(is.na(.x)))) |>
+  pivot_longer(everything(), names_to = "variable", values_to = "n_missing") |>
+  mutate(pct_missing = round(100 * n_missing / nrow(df), 3)) |>
+  filter(n_missing > 0) |>
+  arrange(desc(n_missing))
+
+missing_summary |>
+  kable(caption = "Columns containing missing values.") |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+```{r missing-plot, fig.height=3.8}
+missing_summary |>
+  ggplot(aes(x = reorder(variable, pct_missing), y = pct_missing)) +
+  geom_col(fill = report_fill) +
+  geom_text(aes(label = paste0(n_missing, " (", pct_missing, "%)")),
+            hjust = -0.1, size = 3.2) +
+  coord_flip(ylim = c(0, max(missing_summary$pct_missing) * 1.4)) +
+  labs(title = "Missing values are confined to the six weather variables",
+       subtitle = "All operational and delay variables are 100% complete",
+       x = NULL, y = "% missing")
+```
+
+Missing values are minimal, affecting less than 0.1% of observations and occurring only in weather-related variables. The identical missing counts across origin and destination weather fields suggest that missingness is linked to weather station reporting rather than flight delays themselves. Given the very low proportion of affected records, these missing values are unlikely to influence the analysis significantly. Therefore, rows are retained for EDA, with appropriate imputation to be applied during the modelling phase. Importantly, the target variable (arr_delay) contains no missing values, ensuring that all flights remain available for prediction tasks.
+
+### 2.6.2 Duplicate Records
+
+```{r duplicates}
+# check for duplicate 
+n_dupes <- sum(duplicated(df))
+cat("Fully duplicated rows:", n_dupes, "\n")
+```
+
+No duplicate records were identified in the dataset, indicating that each row represents a unique flight. As a result, no de-duplication is required, and there is minimal risk of double-counting flights in subsequent analyses or modelling activities.
+
+### 2.6.3 Invalid, Inconsistent, and Impossible Values
+
+```{r validity-checks}
+# inspecting values fall within physically plausible ranges.
+validity <- tibble(
+  check = c("Negative air_time",
+            "Negative taxi_out",
+            "Negative taxi_in",
+            "CRS departure timestamps missing",
+            "Actual departure timestamps missing",
+            "Months other than December",
+            "arr_delay outside [-180, 4000] min",
+            "dep_delay outside [-180, 4000] min"),
+  n = c(sum(df$air_time < 0, na.rm = TRUE),
+        sum(df$taxi_out < 0, na.rm = TRUE),
+        sum(df$taxi_in  < 0, na.rm = TRUE),
+        sum(is.na(df$crs_dep_time)),
+        sum(is.na(df$dep_time)),
+        sum(df$month != 12),
+        sum(df$arr_delay < -180 | df$arr_delay > 4000),
+        sum(df$dep_delay < -180 | df$dep_delay > 4000)))
+
+validity |>
+  kable(caption = "Data-validity checks (all counts should be 0).") |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+All data quality checks were passed successfully, with no invalid values, missing key timestamps, out-of-scope records, or implausible delay values detected. This indicates that the dataset is internally consistent and free from major data integrity issues. Consequently, subsequent cleaning efforts can focus on handling genuine extreme delays rather than correcting data errors.
+
+### 2.6.4 Outlier Assessment
+
+```{r outlier-stats}
+# Quantify the extreme right tail of arrival delay using the IQR rule.
+q  <- quantile(df$arr_delay, c(.25, .75))
+iqr <- diff(q)
+upper_fence <- q[2] + 1.5 * iqr
+
+df |>
+  summarise(
+    p95          = quantile(arr_delay, 0.95),
+    p99          = quantile(arr_delay, 0.99),
+    max          = max(arr_delay),
+    upper_fence  = upper_fence,
+    n_above_fence = sum(arr_delay > upper_fence),
+    pct_above    = round(100 * mean(arr_delay > upper_fence), 2)) |>
+  kable(caption = "Upper-tail outlier diagnostics for arr_delay (minutes).") |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+```
+
+```{r outlier-box, fig.height=3.2}
+# Boxplot of arrival delay, with the x-axis clipped so the body is legible.
+ggplot(df, aes(x = arr_delay)) +
+  geom_boxplot(fill = report_fill, alpha = 0.7, outlier.alpha = 0.05) +
+  coord_cartesian(xlim = c(-60, 300)) +
+  labs(title = "Arrival delay is tightly centred with a long right tail",
+       subtitle = "x-axis clipped to [-60, 300] min; rare delays extend beyond 3,700 min",
+       x = "Arrival delay (minutes)", y = NULL) +
+  theme(axis.text.y = element_blank())
+```
+
+Arrival delays exhibit a highly right-skewed distribution, with most flights experiencing little or no delay and a small number of flights experiencing extremely long delays. Although many observations are classified as statistical outliers, they represent genuine operational events rather than data errors and are therefore retained. This distributional pattern highlights the need for modelling approaches that can accommodate skewed data and reinforces the value of the binary delay classification used in this study.
+
+### 2.6.5 Data Transformation and Feature Engineering
+
+```{r feature-eng}
+#  - drop the two constant columns (month, flights);
+#  - derive the binary classification target;
+#  - extract scheduled departure hour and a time-of-day band;
+#  - add a weekend flag and human-readable weekday labels;
+#  - construct a route identifier;
+#  - set year and day_of_week as ordered factors for clean plotting.
+
+weekday_labels <- c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+df_clean <- df |>
+  select(-month, -flights) |>                       # remove zero-information columns
+  mutate(
+    year        = factor(year),
+    dep_hour    = as.integer(format(crs_dep_time, "%H")),
+    time_of_day = cut(dep_hour,
+                      breaks = c(-1, 5, 11, 16, 20, 24),
+                      labels = c("Overnight (0-5)", "Morning (6-11)",
+                                 "Afternoon (12-16)", "Evening (17-20)",
+                                 "Late (21-23)")),
+    weekday     = factor(weekday_labels[day_of_week], levels = weekday_labels),
+    is_weekend  = day_of_week %in% c(6, 7),
+    route       = paste(origin, dest, sep = "-"),
+    # Classification target: significant arrival delay (> 15 minutes).
+    is_delayed  = factor(if_else(arr_delay > 15, "Delayed", "OnTime"),
+                         levels = c("OnTime", "Delayed"))
+  )
+
+cat("Cleaned dataset:", nrow(df_clean), "rows x", ncol(df_clean), "columns\n")
+glimpse(df_clean |> select(year, dep_hour, time_of_day, weekday, is_weekend,
+                           route, arr_delay, is_delayed))
+```
+
+Data transformation produced an analysis-ready dataset while preserving all flight records. Constant variables (month and flights) were removed as they provide no predictive value, while new features were engineered to capture temporal patterns, travel routes, and delay outcomes. These transformations were designed to support the study's research objectives and enhance subsequent analysis and modelling without reducing the dataset size.
+
+---
+
+# Phase 3: Exploratory Data Analysis
+
+## 3.1 Target Variable Overview
+
+```{r target-overview, fig.height=3.6}
+# review target distribution
+target_tab <- df_clean |>
+  count(is_delayed) |>
+  mutate(pct = round(100 * n / sum(n), 2))
+
+target_tab |>
+  kable(caption = "Class distribution of the delay target (arr_delay > 15 min).",
+        format.args = list(big.mark = ",")) |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+
+ggplot(target_tab, aes(is_delayed, n, fill = is_delayed)) +
+  geom_col(width = 0.6) +
+  geom_text(aes(label = paste0(comma(n), "\n(", pct, "%)")), vjust = -0.2, size = 3.5) +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.15))) +
+  scale_fill_manual(values = c(OnTime = "#41ab5d", Delayed = "#e34a33")) +
+  labs(title = "About one in six December flights is significantly delayed",
+       x = NULL, y = "Number of flights") +
+  theme(legend.position = "none")
+```
+
+Approximately 17.8% of flights are classified as delayed, while 82.2% are on time or early, resulting in a moderately imbalanced dataset. Although the imbalance is not extreme, it is sufficient to make accuracy an unreliable performance measure, as a naive model could achieve high accuracy by predicting all flights as on time. Consequently, future classification models should be evaluated using metrics such as precision, recall, F1-score, and ROC-AUC, with appropriate imbalance-handling techniques considered during model development.
+
+## 3.2 Univariate Analysis
+
+### 3.2.1 Distribution of Arrival Delay
+
+```{r uni-arrdelay, fig.height=4}
+ggplot(filter(df_clean, arr_delay >= -60, arr_delay <= 180),
+       aes(arr_delay)) +
+  geom_histogram(binwidth = 5, fill = report_fill, colour = "white") +
+  geom_vline(xintercept = 15, linetype = "dashed", colour = "red") +
+  annotate("text", x = 22, y = Inf, label = "15-min\nthreshold",
+           colour = "red", hjust = 0, vjust = 1.2, size = 3) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Arrival-delay distribution is right-skewed and peaks before zero",
+       subtitle = "Clipped to [-60, 180] min for readability",
+       x = "Arrival delay (minutes)", y = "Number of flights")
+```
+
+Arrival delays follow a right-skewed distribution, with most flights arriving on time or slightly early and a smaller proportion experiencing substantial delays. The long tail of severe delays highlights the complexity of modelling delay duration and suggests that methods capable of handling skewed outcomes may be more appropriate. The 15-minute threshold provides a practical distinction between routine variation and operationally significant delays, supporting its use as the classification boundary in this study.
+
+### 3.2.2 Departure Delay
+
+```{r uni-depdelay, fig.height=4}
+ggplot(filter(df_clean, dep_delay >= -40, dep_delay <= 180),
+       aes(dep_delay)) +
+  geom_histogram(binwidth = 5, fill = "#756bb1", colour = "white") +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Departure delay mirrors arrival delay",
+       subtitle = "Clipped to [-40, 180] min",
+       x = "Departure delay (minutes)", y = "Number of flights")
+```
+
+Departure delays exhibit a distribution similar to arrival delays, with most flights departing on time or slightly early and a smaller number experiencing substantial delays. This pattern suggests a strong relationship between departure and arrival delays, as late departures often translate into late arrivals. Consequently, departure delay is expected to be one of the most influential predictors of arrival delay in subsequent modelling analyses.
+
+### 3.2.3 Carrier Volume
+
+```{r uni-carrier, fig.height=4.2}
+df_clean |>
+  count(op_carrier, sort = TRUE) |>
+  ggplot(aes(reorder(op_carrier, n), n)) +
+  geom_col(fill = report_fill) +
+  geom_text(aes(label = comma(n)), hjust = -0.1, size = 2.8) +
+  coord_flip(clip = "off") +
+  scale_y_continuous(labels = comma, expand = expansion(mult = c(0, 0.18))) +
+  labs(title = "Flight volume is concentrated among a few large carriers",
+       x = "Carrier", y = "Number of flights")
+```
+
+Flight activity is concentrated among a small number of major carriers, with the top five airlines accounting for the majority of December flights. This uneven distribution means that some carriers have substantially more observations than others, which may influence how carrier information is encoded during modelling. The relationship between airline and delay performance is explored further in the bivariate analysis.
+
+### 3.2.4 Weather Variable Distributions
+
+```{r uni-weather, fig.height=4.5}
+# Origin-airport weather distributions on a common panel.
+df_clean |>
+  select(o_temp, o_prcp, o_wspd) |>
+  pivot_longer(everything(), names_to = "var", values_to = "value") |>
+  mutate(var = recode(var,
+                      o_temp = "Temperature (°C)",
+                      o_prcp = "Precipitation (mm)",
+                      o_wspd = "Wind speed (km/h)")) |>
+  ggplot(aes(value)) +
+  geom_histogram(bins = 40, fill = "#2b8cbe", colour = "white") +
+  facet_wrap(~ var, scales = "free", ncol = 3) +
+  scale_y_continuous(labels = comma) +
+  labs(title = "Origin-airport weather: cold, mostly dry, breezy December conditions",
+       x = NULL, y = "Number of flights")
+```
+
+Weather conditions vary considerably across flights. Temperature follows a broad distribution, reflecting the diverse climates of U.S. airports, while precipitation is highly concentrated at zero, indicating that most flights depart under dry conditions. Wind speed is moderately right-skewed, with occasional periods of strong winds. These patterns suggest that weather-related effects may be non-linear, making threshold-based or categorical representations potentially more informative than simple linear relationships.
+
+## 3.3 Bivariate Analysis
+
+### 3.3.1 Departure Delay vs Arrival Delay (Numeric vs Numeric)
+
+```{r biv-depvarr, fig.height=4.5}
+# Scatter on a 25k sample with a reference line
+set.seed(2024)
+df_clean |>
+  slice_sample(n = 25000) |>
+  ggplot(aes(dep_delay, arr_delay)) +
+  geom_point(alpha = 0.08, colour = report_fill) +
+  geom_abline(slope = 1, intercept = 0, colour = "red", linetype = "dashed") +
+  coord_cartesian(xlim = c(-50, 300), ylim = c(-50, 300)) +
+  labs(title = "Departure delay almost perfectly tracks arrival delay (r = 0.97)",
+       subtitle = "25,000-flight sample; red line is y = x",
+       x = "Departure delay (minutes)", y = "Arrival delay (minutes)")
+```
+
+Departure delay exhibits an exceptionally strong positive relationship with arrival delay, indicating that flights departing late are highly likely to arrive late. This identifies departure delay as the most influential operational predictor of arrival performance. However, its practical usefulness depends on when predictions are required, as departure delay may not be available for advance forecasting before the flight leaves the gate.
+
+### 3.3.2 Weather Effects on Flight Delays
+
+The raw Pearson correlations between weather and `arr_delay` are weak (≈ 0.03–0.04),
+which might suggest weather is irrelevant. Binning the weather variables reveals a very
+different, and much stronger, **non-linear** picture.
+
+```{r biv-weather-bins, fig.height=4.6}
+# Delay rate (% > 15 min) across binned weather conditions at the origin.
+make_bin_summary <- function(data, var, breaks, labels, varname) {
+  data |>
+    filter(!is.na(.data[[var]])) |>
+    mutate(bin = cut(.data[[var]], breaks = breaks, labels = labels)) |>
+    group_by(bin) |>
+    summarise(delay_rate = 100 * mean(arr_delay > 15), .groups = "drop") |>
+    mutate(driver = varname)
+}
+
+prcp_b <- make_bin_summary(df_clean, "o_prcp",
+            c(-Inf, 0, 1, 5, 10, Inf),
+            c("0", "0-1", "1-5", "5-10", "10+"), "Precipitation (mm)")
+wspd_b <- make_bin_summary(df_clean, "o_wspd",
+            c(-Inf, 5, 15, 25, 40, Inf),
+            c("0-5", "5-15", "15-25", "25-40", "40+"), "Wind speed (km/h)")
+temp_b <- make_bin_summary(df_clean, "o_temp",
+            c(-Inf, -10, 0, 10, 20, Inf),
+            c("<-10", "-10-0", "0-10", "10-20", "20+"), "Temperature (°C)")
+
+bind_rows(prcp_b, wspd_b, temp_b) |>
+  ggplot(aes(bin, delay_rate, group = driver)) +
+  geom_col(fill = "#2b8cbe") +
+  geom_text(aes(label = paste0(round(delay_rate, 1), "%")), vjust = -0.3, size = 2.8) +
+  facet_wrap(~ driver, scales = "free_x") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Weather effects on delay are strong but NON-linear",
+       subtitle = "Delay rate (% of flights > 15 min late) by binned origin weather",
+       x = NULL, y = "Delay rate (%)")
+```
+
+Weather conditions are associated with higher delay rates, but the relationship is clearly non-linear. Delay rates increase under heavier precipitation and stronger winds, while temperature exhibits a U-shaped pattern, with both very cold and very warm conditions linked to higher delays. These findings indicate that weather effects are driven by thresholds and extremes rather than simple linear relationships, suggesting that non-linear modelling approaches may be better suited to capturing their impact on flight delays.
+
+### 3.3.3 Carrier Performance and Delay Rates
+
+```{r biv-carrier, fig.height=4.4}
+df_clean |>
+  group_by(op_carrier) |>
+  summarise(delay_rate = 100 * mean(arr_delay > 15),
+            mean_delay  = mean(arr_delay), n = n(), .groups = "drop") |>
+  ggplot(aes(reorder(op_carrier, delay_rate), delay_rate, fill = mean_delay)) +
+  geom_col() +
+  geom_text(aes(label = paste0(round(delay_rate, 1), "%")), hjust = -0.1, size = 2.7) +
+  coord_flip(clip = "off") +
+  scale_fill_gradient(low = "#41ab5d", high = "#e34a33",
+                      name = "Mean delay (min)") +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "Punctuality varies widely across carriers",
+       x = "Carrier", y = "Delay rate (% > 15 min)")
+```
+
+Delay performance varies noticeably across airlines, with some carriers experiencing substantially higher delay rates than others. Notably, airline size does not appear to be strongly associated with punctuality, as high-volume carriers do not necessarily perform better or worse than smaller operators. These findings suggest that carrier-specific operational factors contribute to delay performance, making op_carrier a meaningful predictor for subsequent modelling.
+
+### 3.3.4 Delay by Year
+
+```{r biv-year, fig.height=3.8}
+year_summary <- df_clean |>
+  group_by(year) |>
+  summarise(n_flights      = n(),
+            mean_arr_delay = round(mean(arr_delay), 2),
+            median_arr     = median(arr_delay),
+            delay_rate_pct = round(100 * mean(arr_delay > 15), 2),
+            mean_dep_delay = round(mean(dep_delay), 2),
+            .groups = "drop")
+
+year_summary |>
+  kable(caption = "Year-over-year delay comparison",
+        format.args = list(big.mark = ",")) |>
+  kable_styling(full_width = FALSE, bootstrap_options = c("striped", "hover"))
+
+ggplot(year_summary, aes(year, delay_rate_pct, fill = year)) +
+  geom_col(width = 0.55) +
+  geom_text(aes(label = paste0(delay_rate_pct, "%")), vjust = -0.3, size = 4) +
+  scale_fill_manual(values = c("2023" = "#41ab5d", "2024" = "#e34a33")) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.15))) +
+  labs(title = "December 2024 Experienced Higher Delay Rates Than December 2023",
+       x = NULL, y = "Delay rate (% > 15 min)") +
+  theme(legend.position = "none")
+```
+
+Flight performance deteriorated noticeably between December 2023 and December 2024. Average arrival and departure delays increased, while the proportion of flights delayed by more than 15 minutes rose substantially despite only a modest increase in flight volume. These findings indicate that December 2024 was both busier and less punctual than the previous year. As a result, the year variable is likely to be informative for modelling, and both seasons should be represented during model training and evaluation to ensure the model can generalize across changing operating conditions.
+
+## 3.4 Multivariate Analysis
+
+### 3.4.1 Correlation Heatmap
+
+```{r multi-corr, fig.height=6}
+corr_vars <- c("arr_delay", "dep_delay", "taxi_out", "taxi_in", "air_time",
+               "crs_elapsed_time", "actual_elapsed_time",
+               "o_temp", "o_prcp", "o_wspd", "d_temp", "d_prcp", "d_wspd",
+               "day_of_month", "day_of_week")
+
+cmat <- cor(select(df_clean, all_of(corr_vars)), use = "pairwise.complete.obs")
+
+corrplot(cmat, method = "color", type = "upper",
+         tl.col = "black", tl.cex = 0.75, tl.srt = 45,
+         addCoef.col = "grey20", number.cex = 0.55,
+         col = colorRampPalette(c("#2166ac", "white", "#b2182b"))(200),
+         mar = c(0, 0, 1.5, 0),
+         title = "Correlation matrix of numeric variables")
+```
+
+The correlation analysis reinforces earlier findings that departure delay is the strongest predictor of arrival delay, exhibiting a substantially stronger relationship than any other variable. It also reveals high correlations among several flight duration measures, indicating potential redundancy and multicollinearity. In contrast, weather variables show only weak linear relationships with delays, supporting the earlier conclusion that their effects are likely non-linear. These findings suggest that redundant duration variables should be reduced and that modelling approaches less sensitive to correlated predictors may be more appropriate than standard linear regression.
+
+### 3.4.2 Time of Day × Year Interaction
+
+```{r multi-hour-year, fig.height=4.4}
+df_clean |>
+  group_by(year, dep_hour) |>
+  summarise(delay_rate = 100 * mean(arr_delay > 15), n = n(), .groups = "drop") |>
+  filter(n >= 200) |>
+  ggplot(aes(dep_hour, delay_rate, colour = year)) +
+  geom_line(linewidth = 1) +
+  geom_point(size = 1.3) +
+  scale_colour_manual(values = c("2023" = "#41ab5d", "2024" = "#e34a33")) +
+  scale_x_continuous(breaks = seq(0, 23, 3)) +
+  labs(title = "Delays build through the day and 2024 sits above 2023 at every hour",
+       x = "Scheduled departure hour", y = "Delay rate (% > 15 min)",
+       colour = "Year")
+```
+
+Delay rates increase steadily throughout the day, with early-morning flights experiencing the lowest risk of delay and evening departures the highest. This pattern reflects the accumulation and propagation of operational disruptions as the day progresses, highlighting the importance of departure time as a predictor of delays. Additionally, delay rates are consistently higher in 2024 across nearly all time periods, indicating that the year-over-year decline in punctuality was widespread rather than limited to specific parts of the day.
+
+### 3.4.3 Day of Month Pattern
+
+```{r multi-dom, fig.height=4}
+df_clean |>
+  group_by(day_of_month) |>
+  summarise(delay_rate = 100 * mean(arr_delay > 15), .groups = "drop") |>
+  ggplot(aes(day_of_month, delay_rate)) +
+  geom_line(colour = report_fill, linewidth = 1) +
+  geom_point(colour = report_fill) +
+  scale_x_continuous(breaks = seq(1, 31, 2)) +
+  labs(title = "Delay risk spikes around the post-Christmas travel surge",
+       x = "Day of December", y = "Delay rate (% > 15 min)")
+```
+
+Delay rates vary throughout the month, with the highest levels occurring during the late-December holiday travel period. This pattern suggests that holiday-related travel demand is a key contributor to flight delays, while early December remains comparatively less congested. The findings indicate that day-of-month effects contain meaningful predictive information and should be considered in subsequent modelling.
+
+
+---
+
+# Phase 4: Modelling
+
+This phase develops predictive models for two objectives: regression, which predicts arrival delay duration (arr_delay), and classification, which predicts whether a flight is delayed by more than 15 minutes (is_delayed). Building on the insights gained from the exploratory analysis, both linear and tree-based approaches are evaluated to determine how effectively operational, temporal, and weather-related factors can be used to predict flight delays.
+
+---
+
+# References
+
+- U.S. Department of Transportation, Bureau of Transportation Statistics —
+  *Reporting Carrier On-Time Performance Data*.
+- *Aeolus — A Multi-Modal Flight Delay Dataset* (https://www.kaggle.com/datasets/flnny123/mfddmulti-modal-flight-delay-dataset/versions/3/data), accessed June 2026.
+
+
+---
+
+```{r session-info, cache=FALSE}
+sessionInfo()
+```
