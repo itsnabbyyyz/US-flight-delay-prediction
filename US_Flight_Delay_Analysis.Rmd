@@ -16,6 +16,7 @@ output:
 ```{r setup, include=FALSE}
 # Global knitr options: show code, suppress messages/warnings in the rendered
 # report, cache the expensive data-ingestion step, and standardise figure size.
+
 knitr::opts_chunk$set(
   echo       = TRUE,
   message    = FALSE,
@@ -410,6 +411,9 @@ glimpse(df_clean |> select(year, dep_hour, time_of_day, weekday, is_weekend,
 
 Data transformation produced an analysis-ready dataset while preserving all flight records. Constant variables (month and flights) were removed as they provide no predictive value, while new features were engineered to capture temporal patterns, travel routes, and delay outcomes. These transformations were designed to support the study's research objectives and enhance subsequent analysis and modelling without reducing the dataset size.
 
+```{r}
+saveRDS(df_clean, "df_clean.rds")
+```
 ---
 
 # Phase 3: Exploratory Data Analysis
@@ -680,9 +684,918 @@ Delay rates vary throughout the month, with the highest levels occurring during 
 
 # Phase 4: Modelling
 
-This phase develops predictive models for two objectives: regression, which predicts arrival delay duration (arr_delay), and classification, which predicts whether a flight is delayed by more than 15 minutes (is_delayed). Building on the insights gained from the exploratory analysis, both linear and tree-based approaches are evaluated to determine how effectively operational, temporal, and weather-related factors can be used to predict flight delays.
+This phase develops predictive models addressing two complementary analytical objectives derived from the research questions:
+
+1. **Can we predict whether a flight will be delayed by more than 15 mins?** — answered through classification
+2. **Can we predict how long a flight will be delayed?** — answered through regression
+
+Both objectives are evaluated under two modelling scenarios:
+
+- **Scenario A (Pre-Departure):** Uses only features available before the flight departs — such as scheduled times, carrier, route, and weather forecasts. This represents a realistic advance-prediction setting applicable at the time of booking or check-in.
+- **Scenario B (Post-Departure):** Adds real-time operational features such as departure delay (`dep_delay`), taxi times, and air time. This represents a gate-arrival estimation setting once the flight is airborne.
 
 ---
+
+# 4.1 Classification Modelling
+
+The objective of the classification task is to predict whether a flight will arrive on time or experience a significant arrival delay. A binary target variable, is_delayed, was created from arrival delay, where flights arriving more than 15 minutes late were classified as Delayed and all others as OnTime.
+
+Two modelling scenarios were evaluated. Model A utilised operational, temporal, geographical, and weather-related variables, while Model B additionally included departure delay (dep_delay). Logistic Regression and Random Forest were implemented and compared using Accuracy, Precision, Recall (Sensitivity), Balanced Accuracy, and Cohen's Kappa.
+
+### 4.1.1 Classification Data Preparation
+
+#### Missing Value Treatment
+
+Missing values in six weather-related variables (o_temp, o_prcp, o_wspd, d_temp, d_prcp, and d_wspd) were handled using median imputation. This approach ensured complete data for model training while remaining robust to outliers. Following imputation, no missing values remained in the dataset.
+
+```{r classification_libraries, include=FALSE}
+library(tidyverse)
+library(rsample)
+library(caret)
+library(ranger)
+```
+
+```{r classification_load_data}
+#=========================================================
+# Load Cleaned Dataset
+#=========================================================
+
+df_clean <- readRDS("df_clean.rds")
+
+dim(df_clean)
+```
+
+```{r classification_missing_values}
+#=========================================================
+# Missing Value Treatment
+#=========================================================
+
+weather_cols <- c(
+  "o_temp", "o_prcp", "o_wspd",
+  "d_temp", "d_prcp", "d_wspd"
+)
+
+for(col in weather_cols) {
+  df_clean[[col]][is.na(df_clean[[col]])] <-
+    median(df_clean[[col]], na.rm = TRUE)
+}
+
+colSums(is.na(df_clean))
+```
+#### Feature Selection
+
+Variables that directly revealed the final arrival outcome were excluded to prevent target leakage. Consequently, arr_delay was removed because it was used to construct the target variable, is_delayed.
+
+The route variable was also excluded as its information was already represented by the origin and dest variables. Finally, categorical variables were converted to factors to ensure compatibility with the classification algorithms.
+
+```{r modelA_dataset}
+#=========================================================
+# Model A Dataset
+# Excludes departure delay
+#=========================================================
+
+modelA_df <- df_clean %>%
+  select(
+    is_delayed,
+    op_carrier,
+    origin,
+    dest,
+    route,
+    day_of_month,
+    day_of_week,
+    year,
+    dep_hour,
+    time_of_day,
+    weekday,
+    is_weekend,
+    o_temp,
+    o_prcp,
+    o_wspd,
+    d_temp,
+    d_prcp,
+    d_wspd,
+    o_latitude,
+    o_longitude,
+    d_latitude,
+    d_longitude
+  )
+
+glimpse(modelA_df)
+```
+```{r modelA_split}
+#=========================================================
+# Train-Test Split
+#=========================================================
+
+set.seed(123)
+
+split_obj <- initial_split(
+  modelA_df,
+  prop = 0.80,
+  strata = is_delayed
+)
+
+train_data <- training(split_obj)
+test_data  <- testing(split_obj)
+
+dim(train_data)
+dim(test_data)
+```
+
+```{r modelA_preprocessing}
+#=========================================================
+# Prepare Data for Classification Models
+#=========================================================
+
+train_data <- train_data %>%
+  mutate(across(where(is.character), as.factor))
+
+test_data <- test_data %>%
+  mutate(across(where(is.character), as.factor))
+
+train_data <- train_data %>%
+  select(-route)
+
+test_data <- test_data %>%
+  select(-route)
+
+train_data$is_weekend <- as.factor(train_data$is_weekend)
+test_data$is_weekend  <- as.factor(test_data$is_weekend)
+
+str(train_data)
+```
+
+## 4.1.2 Logistic Regression – Model A
+
+Logistic Regression was selected as the baseline classification model due to its simplicity and interpretability. The model estimates the probability that a flight belongs to the delayed class based on the relationship between the predictor variables and the binary target variable.
+
+Model A was trained using operational, temporal, geographical, and weather-related variables. Model performance was evaluated using Accuracy, Precision, Recall, Balanced Accuracy, and Cohen's Kappa.
+
+```{r logA_model}
+#=========================================================
+# Logistic Regression - Model A
+#=========================================================
+# Purpose:
+# Establish a baseline classification model using
+# operational, temporal, geographical and weather
+# variables without departure delay information.
+#=========================================================
+
+log_model <- glm(
+  is_delayed ~ .,
+  data = train_data,
+  family = binomial
+)
+
+summary(log_model)
+```
+```{r logA_prediction}
+#=========================================================
+# Generate Prediction Probabilities
+#=========================================================
+# Predict the probability that each flight belongs
+# to the delayed class.
+#=========================================================
+
+log_prob <- predict(
+  log_model,
+  newdata = test_data,
+  type = "response"
+)
+
+summary(log_prob)
+```
+```{r logA_classification}
+#=========================================================
+# Convert Probabilities into Class Labels
+#=========================================================
+# Flights with probability greater than 0.50 are
+# classified as Delayed; otherwise OnTime.
+#=========================================================
+
+log_pred <- ifelse(
+  log_prob > 0.5,
+  "Delayed",
+  "OnTime"
+)
+
+log_pred <- factor(
+  log_pred,
+  levels = levels(test_data$is_delayed)
+)
+
+table(log_pred)
+```
+```{r logA_evaluation}
+#=========================================================
+# Evaluate Logistic Regression Model A
+#=========================================================
+
+log_cm <- confusionMatrix(
+  log_pred,
+  test_data$is_delayed,
+  positive = "Delayed"
+)
+
+log_cm
+```
+Logistic Regression Model A achieved an accuracy of 82.28%. However, despite the relatively high accuracy, the model performed poorly in identifying delayed flights, achieving a recall of only 1.00%. In contrast, specificity reached 99.82%, indicating that the model primarily predicted the majority class (OnTime). This behaviour is reflected in the low balanced accuracy (50.41%) and Cohen's Kappa (0.0134). Overall, Logistic Regression Model A served as a useful baseline but was ineffective for detecting flight delays in this dataset.
+
+## 4.1.3 Random Forest – Model A
+
+Random Forest was implemented to capture nonlinear relationships and interactions among the predictor variables. Unlike Logistic Regression, Random Forest combines multiple decision trees to improve predictive performance and robustness.
+
+Model A was trained using operational, temporal, geographical, and weather-related variables. A Random Forest classifier consisting of 200 trees was developed and evaluated using the same training and testing datasets as Logistic Regression Model A.
+
+```{r rfA_training}
+#=========================================================
+# Random Forest Model A
+#=========================================================
+
+library(ranger)
+
+rf_model <- ranger(
+  is_delayed ~ .,
+  data = train_data,
+  num.trees = 200,
+  probability = FALSE,
+  importance = "impurity",
+  seed = 123
+)
+
+rf_model
+```
+
+```{r rfA_prediction}
+#=========================================================
+# Generate Random Forest Predictions
+#=========================================================
+# Predict class probabilities for each flight in the
+# test dataset using the trained Random Forest model.
+#=========================================================
+
+rf_pred_prob <- predict(
+  rf_model,
+  data = test_data
+)$predictions
+
+head(rf_pred_prob)
+```
+
+```{r rfA_classification}
+#=========================================================
+# Convert Probabilities into Class Labels
+#=========================================================
+# Flights with a predicted probability greater than
+# 0.50 are classified as delayed.
+#=========================================================
+
+rf_pred_class <- ifelse(
+  rf_pred_prob[, "Delayed"] > 0.5,
+  "Delayed",
+  "OnTime"
+)
+
+rf_pred_class <- factor(
+  rf_pred_class,
+  levels = levels(test_data$is_delayed)
+)
+
+table(rf_pred_class)
+```
+
+```{r rfA_evaluation}
+#=========================================================
+# Evaluate Random Forest Performance
+#=========================================================
+# Generate confusion matrix and classification
+# performance metrics.
+#=========================================================
+
+rf_cm <- confusionMatrix(
+  rf_pred_class,
+  test_data$is_delayed,
+  positive = "Delayed"
+)
+
+rf_cm
+```
+
+Random Forest Model A achieved an accuracy of 84.19%, outperforming Logistic Regression Model A (82.28%). The model recorded a precision of 69.10% and a recall of 19.78%, demonstrating a substantially improved ability to identify delayed flights compared to Logistic Regression, which achieved a recall of only 1.00%.
+
+The balanced accuracy increased to 58.94%, indicating improved performance across both classes while maintaining high specificity (98.09%). These results suggest that Random Forest was better able to capture nonlinear relationships and interactions among operational, temporal, geographical, and weather-related variables, resulting in superior classification performance when departure delay information was excluded.
+
+## 4.1.4 Logistic Regression – Model B
+
+Logistic Regression Model B was developed using the same predictors as Model A, with the addition of departure delay (dep_delay). This variable provides information about operational disruptions occurring before take-off and is expected to be strongly associated with arrival delays.
+
+The inclusion of departure delay allows the model to evaluate whether predictive performance improves when real-time operational information is available. Model performance was assessed using Accuracy, Precision, Recall, Balanced Accuracy, and Cohen's Kappa.
+
+```{r modelB_dataset}
+#=========================================================
+# Construct Model B Dataset
+#=========================================================
+# Model B includes departure delay in addition to the
+# operational, temporal, geographical and weather
+# variables used in Model A.
+#=========================================================
+
+modelB_df <- df_clean %>%
+  select(
+    is_delayed,
+
+    dep_delay,
+
+    op_carrier,
+    origin,
+    dest,
+
+    day_of_month,
+    day_of_week,
+    year,
+
+    dep_hour,
+    time_of_day,
+    weekday,
+    is_weekend,
+
+    o_temp,
+    o_prcp,
+    o_wspd,
+
+    d_temp,
+    d_prcp,
+    d_wspd,
+
+    o_latitude,
+    o_longitude,
+    d_latitude,
+    d_longitude
+  )
+
+dim(modelB_df)
+```
+
+```{r modelB_split}
+#=========================================================
+# Training-Test Split
+#=========================================================
+
+set.seed(123)
+
+splitB <- initial_split(
+  modelB_df,
+  prop = 0.80,
+  strata = is_delayed
+)
+
+trainB <- training(splitB)
+testB  <- testing(splitB)
+
+dim(trainB)
+dim(testB)
+```
+
+```{r modelB_preparation}
+#=========================================================
+# Prepare Data for Classification Models
+#=========================================================
+
+trainB <- trainB %>%
+  mutate(across(where(is.character), as.factor))
+
+testB <- testB %>%
+  mutate(across(where(is.character), as.factor))
+
+trainB$is_weekend <- as.factor(trainB$is_weekend)
+testB$is_weekend  <- as.factor(testB$is_weekend)
+
+str(trainB)
+```
+```{r logB_training}
+#=========================================================
+# Logistic Regression Model B
+#=========================================================
+# Model B extends Model A by including departure delay
+# as an additional predictor.
+#=========================================================
+
+log_model_B <- glm(
+  is_delayed ~ .,
+  data = trainB,
+  family = binomial
+)
+
+summary(log_model_B)
+```
+
+```{r logB_prediction}
+#=========================================================
+# Generate Prediction Probabilities
+#=========================================================
+
+log_prob_B <- predict(
+  log_model_B,
+  newdata = testB,
+  type = "response"
+)
+
+summary(log_prob_B)
+```
+
+```{r logB_classification}
+#=========================================================
+# Convert Probabilities to Classes
+#=========================================================
+
+log_pred_B <- ifelse(log_prob_B > 0.5,
+                     "Delayed",
+                     "OnTime")
+
+log_pred_B <- factor(
+  log_pred_B,
+  levels = c("OnTime", "Delayed")
+)
+
+table(log_pred_B)
+```
+
+```{r logB_evaluation}
+#=========================================================
+# Evaluate Logistic Regression Model B
+#=========================================================
+
+library(caret)
+
+log_cm_B <- confusionMatrix(
+  log_pred_B,
+  testB$is_delayed,
+  positive = "Delayed"
+)
+
+log_cm_B
+```
+Model B achieved an accuracy of 93.42%, substantially improving upon Logistic Regression Model A (82.28%). The inclusion of departure delay provided significant predictive power, enabling the model to better distinguish between delayed and on-time flights.
+
+The model achieved a recall of 71.35% and a precision of 89.43%, indicating strong performance in identifying delayed flights while maintaining a low rate of false positives. Specificity remained high at 98.18%, demonstrating excellent performance in correctly classifying on-time flights. The balanced accuracy of 84.76% and Cohen's Kappa of 0.7551 further indicate strong classification performance across both classes.
+
+Compared with Model A, the substantial improvement in recall confirms that departure delay is a highly influential predictor of arrival delay. These findings suggest that incorporating real-time operational information significantly enhances flight delay prediction performance.
+
+## 4.1.4 Random Forest – Model B
+
+Random Forest Model B was developed using the same predictors as Random Forest Model A, with the addition of departure delay (dep_delay). The inclusion of departure delay allows the model to incorporate real-time operational information that may influence a flight's final arrival status.
+
+By combining this enhanced feature set with an ensemble learning approach, Random Forest Model B is designed to capture complex nonlinear relationships and interactions among operational, temporal, geographical, and weather-related variables. The model was trained using 200 decision trees and evaluated using Accuracy, Precision, Recall, Balanced Accuracy, and Cohen's Kappa.
+```{r rfB_training}
+#=========================================================
+# Random Forest Model B
+#=========================================================
+# Model B includes departure delay as an additional
+# predictor variable.
+#=========================================================
+
+library(ranger)
+
+rf_model_B <- ranger(
+  is_delayed ~ .,
+  data = trainB,
+  num.trees = 200,
+  probability = TRUE,
+  importance = "impurity",
+  seed = 123
+)
+
+rf_model_B
+```
+
+```{r rfB_prediction}
+#=========================================================
+# Generate Random Forest Predictions
+#=========================================================
+# Predict probability of each flight belonging
+# to the delayed class.
+#=========================================================
+
+rf_pred_B <- predict(
+  rf_model_B,
+  data = testB
+)
+
+rf_prob_B <- rf_pred_B$predictions[, "Delayed"]
+
+summary(rf_prob_B)
+```
+
+```{r rfB_classification}
+#=========================================================
+# Convert Probabilities to Classes
+#=========================================================
+# Flights with probability > 0.5 are classified
+# as Delayed, otherwise OnTime.
+#=========================================================
+
+rf_class_B <- ifelse(
+  rf_prob_B > 0.5,
+  "Delayed",
+  "OnTime"
+)
+
+rf_class_B <- factor(
+  rf_class_B,
+  levels = c("OnTime", "Delayed")
+)
+
+table(rf_class_B)
+```
+
+```{r rfB_evaluation}
+#=========================================================
+# Evaluate Random Forest Model B
+#=========================================================
+
+library(caret)
+
+rf_cm_B <- confusionMatrix(
+  rf_class_B,
+  testB$is_delayed,
+  positive = "Delayed"
+)
+
+rf_cm_B
+```
+
+Random Forest Model B was developed using the same feature set as Model A, with the addition of departure delay (dep_delay). By incorporating this operational variable, the model was able to capture both nonlinear relationships and real-time flight conditions that influence arrival delays.
+
+The model achieved an accuracy of 93.93%, representing the highest classification performance among all models evaluated. It also achieved a precision of 91.07% and a recall of 72.96%, indicating strong performance in identifying delayed flights while maintaining a low false-positive rate. Furthermore, the model achieved a specificity of 98.46%, demonstrating excellent performance in correctly classifying on-time flights. The balanced accuracy of 85.71% and Cohen's Kappa value of 0.7745 further confirm strong classification performance across both classes.
+
+Compared with Logistic Regression Model B, Random Forest Model B produced slightly higher accuracy, recall, balanced accuracy, and Kappa, suggesting that nonlinear relationships and feature interactions contribute additional predictive value beyond what can be captured by a linear model. The results indicate that combining operational, temporal, route, weather, and departure delay information with an ensemble learning approach provides the most effective solution for flight delay classification in this study.
+
+## 4.1.6 Classification Model Comparison
+
+```{r classification_comparison, echo=FALSE}
+comparison_table <- data.frame(
+  Model = c(
+    "Logistic Regression A",
+    "Random Forest A",
+    "Logistic Regression B",
+    "Random Forest B"
+  ),
+  Accuracy = c(82.28, 84.19, 93.42, 93.93),
+  Recall = c(1.00, 19.78, 71.35, 72.96),
+  Specificity = c(99.82, 98.09, 98.18, 98.46),
+  Balanced_Accuracy = c(50.41, 58.94, 84.76, 85.71)
+)
+
+knitr::kable(
+  comparison_table,
+  caption = "Classification Model Performance Comparison"
+)
+```
+Among the four classification models evaluated, Random Forest Model B achieved the best overall performance, with an accuracy of 93.93%, recall of 72.96%, specificity of 98.46%, and balanced accuracy of 85.71%. The inclusion of departure delay substantially improved predictive performance across both Logistic Regression and Random Forest models, highlighting its importance as a predictor of arrival delays.
+
+Overall, Random Forest models consistently outperformed Logistic Regression models, suggesting that nonlinear relationships and interactions among operational, temporal, geographical, and weather-related variables contribute to flight delay outcomes. Consequently, Random Forest Model B was selected as the best-performing classification model for flight delay prediction.
+
+---
+
+# 4.2 Regression Modelling
+
+The regression task predicts the **exact arrival delay duration in minutes** (`arr_delay`). 
+
+Two algorithms are evaluated in order of increasing complexity:
+
+- **Linear Regression** — interpretable baseline assuming linear feature relationships
+- **Random Forest** — ensemble of decision trees capturing non-linear interactions
+
+Both models are trained and evaluated under two scenarios:
+
+| Scenario | Features Available | Use Case |
+|----------|-------------------|----------|
+| **A — Pre-Departure** | Schedule, carrier, route, weather forecast | Prediction at booking or check-in |
+| **B — Post-Departure** | Above + `dep_delay`, taxi times, air time | Real-time gate-arrival estimation |
+
+---
+
+## 4.2.1 Data Preparation
+
+### Loading the Dataset
+
+The cleaned dataset saved during Phase 2 is loaded directly, ensuring consistency with all prior cleaning, feature engineering, and imputation decisions.
+
+## 4.2 Load Cleaned Dataset
+
+The cleaned dataset produced in Phase 2 is loaded. It contains 1,133,043 flight records with missing values confined to the six weather variables.
+
+```{r load-data}
+df_model <- readRDS("cleaned_flights.rds")
+
+cat("Rows:", nrow(df_model), "\n")
+cat("Columns:", ncol(df_model), "\n")
+```
+### Missing Value Imputation
+
+Missing values are confined to the six weather variables at less than 0.1%of observations. Median imputation is applied as it is more robust than mean imputation for skewed distributions.
+
+### Before Imputation
+
+```{r impute-before}
+weather_vars <- c("o_temp", "o_prcp", "o_wspd",
+                  "d_temp", "d_prcp", "d_wspd")
+
+df_model |>
+  summarise(across(all_of(weather_vars), ~ sum(is.na(.x)))) |>
+  pivot_longer(everything(),
+               names_to  = "variable",
+               values_to = "n_missing") |>
+  mutate(pct_missing = round(100 * n_missing / nrow(df_model), 4)) |>
+  kable(caption = "Missing values before imputation.") |>
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c("striped", "hover"))
+```
+
+### Apply Median Imputation
+
+```{r impute-apply}
+df_model <- df_model |>
+  mutate(across(all_of(weather_vars),
+                ~ if_else(is.na(.x),
+                          median(.x, na.rm = TRUE),
+                          .x)))
+```
+
+### After Imputation
+
+```{r impute-after}
+df_model |>
+  summarise(across(all_of(weather_vars), ~ sum(is.na(.x)))) |>
+  pivot_longer(everything(),
+               names_to  = "variable",
+               values_to = "n_missing") |>
+  kable(caption = "Missing values after imputation (all should be 0).") |>
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c("striped", "hover"))
+
+cat("Total missing values remaining:", sum(is.na(df_model)), "\n")
+```
+### Feature Selection
+
+Variables that would cause data leakage or are redundant are removed before modelling. Leakage occurs when information that would not be available at prediction time is included as a predictor, leading to overly optimistic model performance.
+
+The following variables are excluded:
+
+- `arr_time`, `actual_elapsed_time`, `wheels_off`, `wheels_on` — only known after the flight lands
+- `is_delayed` — derived directly from `arr_delay`, our target variable
+- `route` — too many unique combinations; `origin` and `dest` already capture this
+- `fl_date`, `crs_dep_time` — replaced by engineered features `dep_hour`, `day_of_month` etc
+- `op_carrier_fl_num` — individual flight numbers do not generalise
+
+```{r feature-select}
+reg_df <- df_model |>
+  select(
+    arr_delay,                          # target
+    dep_delay, taxi_out, taxi_in,       # operational
+    air_time, crs_elapsed_time,         # schedule
+    dep_hour, time_of_day,              # temporal
+    day_of_month, day_of_week,
+    weekday, is_weekend, year,
+    op_carrier, origin, dest,           # categorical
+    o_temp, o_prcp, o_wspd,             # origin weather
+    d_temp, d_prcp, d_wspd,             # destination weather
+    o_latitude, o_longitude,            # geospatial
+    d_latitude, d_longitude
+  )
+
+cat("Final dataset for modelling:", nrow(reg_df), "rows x", 
+    ncol(reg_df), "columns\n")
+```
+
+### Train / Test Split
+
+The dataset is split into 80% training and 20% testing using a random sample. A seed is set to ensure reproducibility.
+
+```{r split}
+set.seed(42)
+
+train_index <- sample(1:nrow(reg_df), size = 0.8 * nrow(reg_df))
+
+reg_train <- reg_df[train_index, ]
+reg_test  <- reg_df[-train_index, ]
+
+cat("Training set:", nrow(reg_train), "rows\n")
+cat("Test set:", nrow(reg_test), "rows\n")
+```
+### Preprocessing
+
+Categorical variables such as `op_carrier`, `origin`, `dest`, `time_of_day` and `weekday` are converted to numeric using label encoding. Boolean and factor variables are also converted to integer for compatibility with all three models.
+
+```{r preprocess}
+# Convert categoricals to numeric for all three models
+encode_df <- function(df) {
+  df |>
+    mutate(
+      op_carrier  = as.integer(factor(op_carrier)),
+      origin      = as.integer(factor(origin)),
+      dest        = as.integer(factor(dest)),
+      time_of_day = as.integer(factor(time_of_day)),
+      weekday     = as.integer(factor(weekday)),
+      year        = as.integer(as.character(year)),
+      is_weekend  = as.integer(is_weekend)
+    )
+}
+
+reg_train_enc <- encode_df(reg_train)
+reg_test_enc  <- encode_df(reg_test)
+
+cat("Any missing values in training set:", sum(is.na(reg_train_enc)), "\n")
+cat("Any missing values in test set:", sum(is.na(reg_test_enc)), "\n")
+```
+
+## 4.2.2 Scenario A: Pre-Departure Prediction (No `dep_delay`)
+
+In this scenario, only features available **before the flight departs** are used. Variables such as `dep_delay`, `taxi_out`, `taxi_in`, and `air_time` are excluded because they are only known after the flight has operated. This represents a realistic advance-prediction setting.
+
+```{r scenario-a-features}
+safe_features <- c(
+  "arr_delay",                        # target
+  "crs_elapsed_time",                 # scheduled duration
+  "dep_hour", "day_of_month",         # temporal
+  "day_of_week", "is_weekend", "year",
+  "op_carrier", "origin", "dest",     # categorical
+  "time_of_day", "weekday",
+  "o_temp", "o_prcp", "o_wspd",       # origin weather
+  "d_temp", "d_prcp", "d_wspd",       # destination weather
+  "o_latitude", "o_longitude",        # geospatial
+  "d_latitude", "d_longitude"
+)
+
+reg_train_safe <- reg_train_enc |> select(all_of(safe_features))
+reg_test_safe  <- reg_test_enc  |> select(all_of(safe_features))
+
+cat("Features used (Scenario A):", ncol(reg_train_safe) - 1, "\n")
+```
+
+### 4.2.2.1 Linear Regression — Scenario A
+
+Linear Regression serves as the interpretable baseline model. It estimates a linear relationship between the available pre-departure features and arrival delay. Given the non-linear delay patterns identified during EDA, Linear Regression is expected to underperform compared to the ensemble approach, but provides a useful performance benchmark.
+
+```{r lm-a}
+lm_model_a <- lm(arr_delay ~ ., data = reg_train_safe)
+
+lm_pred_a <- predict(lm_model_a, newdata = reg_test_safe)
+
+lm_rmse_a <- sqrt(mean((reg_test_safe$arr_delay - lm_pred_a)^2))
+lm_mae_a  <- mean(abs(reg_test_safe$arr_delay - lm_pred_a))
+lm_rsq_a  <- cor(reg_test_safe$arr_delay, lm_pred_a)^2
+
+cat("Linear Regression (Pre-Departure):\n")
+cat("RMSE:", round(lm_rmse_a, 3), "\n")
+cat("MAE: ", round(lm_mae_a,  3), "\n")
+cat("R²:  ", round(lm_rsq_a,  3), "\n")
+```
+
+### 4.2.2.2 Random Forest — Scenario A
+
+Random Forest captures non-linear relationships and feature interactions that Linear Regression cannot model. It constructs an ensemble of decision trees, each trained on a random subset of data and features, with the final prediction averaged across all trees. To manage computational resources, the model is trained on a 20% sample of the training data with 100 trees.
+
+```{r rf-a}
+library(ranger)
+
+set.seed(42)
+train_sample_a <- reg_train_safe |> slice_sample(prop = 0.2)
+
+rf_model_a <- ranger(
+  arr_delay ~ .,
+  data          = train_sample_a,
+  num.trees     = 100,
+  mtry          = 5,
+  min.node.size = 20,
+  importance    = "impurity",
+  seed          = 42
+)
+
+rf_pred_a <- predict(rf_model_a, data = reg_test_safe)$predictions
+
+rf_rmse_a <- sqrt(mean((reg_test_safe$arr_delay - rf_pred_a)^2))
+rf_mae_a  <- mean(abs(reg_test_safe$arr_delay - rf_pred_a))
+rf_rsq_a  <- cor(reg_test_safe$arr_delay, rf_pred_a)^2
+
+cat("Random Forest (Pre-Departure):\n")
+cat("RMSE:", round(rf_rmse_a, 3), "\n")
+cat("MAE: ", round(rf_mae_a,  3), "\n")
+cat("R²:  ", round(rf_rsq_a,  3), "\n")
+```
+## 4.2.3 Scenario B: Post-Departure Prediction
+
+In Scenario B, features that become available **after the flight has departed** are added — specifically `dep_delay`, `taxi_out`, `taxi_in`, and `air_time`. This represents a real-time gate-arrival estimation setting. As identified in the EDA phase, departure delay alone exhibits a correlation of r = 0.97 with arrival delay, and its inclusion is expected to substantially improve model performance.
+
+```{r scenario-b-features}
+post_features <- c(
+  "arr_delay",                        # target
+  "dep_delay",                        # key post-departure signal
+  "taxi_out", "taxi_in",              # operational (post-departure)
+  "air_time",                         # in-flight duration
+  "crs_elapsed_time",                 # scheduled duration
+  "dep_hour", "day_of_month",         # temporal
+  "day_of_week", "is_weekend", "year",
+  "op_carrier", "origin", "dest",     # categorical
+  "time_of_day", "weekday",
+  "o_temp", "o_prcp", "o_wspd",       # origin weather
+  "d_temp", "d_prcp", "d_wspd",       # destination weather
+  "o_latitude", "o_longitude",        # geospatial
+  "d_latitude", "d_longitude"
+)
+
+reg_train_post <- reg_train_enc |> select(all_of(post_features))
+reg_test_post  <- reg_test_enc  |> select(all_of(post_features))
+
+cat("Features used (Scenario B):", ncol(reg_train_post) - 1, "\n")
+```
+
+### 4.2.3.1 Linear Regression — Scenario B
+
+```{r lm-b}
+lm_model_b <- lm(arr_delay ~ ., data = reg_train_post)
+
+lm_pred_b <- predict(lm_model_b, newdata = reg_test_post)
+
+lm_rmse_b <- sqrt(mean((reg_test_post$arr_delay - lm_pred_b)^2))
+lm_mae_b  <- mean(abs(reg_test_post$arr_delay - lm_pred_b))
+lm_rsq_b  <- cor(reg_test_post$arr_delay, lm_pred_b)^2
+
+cat("Linear Regression (Post-Departure):\n")
+cat("RMSE:", round(lm_rmse_b, 3), "\n")
+cat("MAE: ", round(lm_mae_b,  3), "\n")
+cat("R²:  ", round(lm_rsq_b,  3), "\n")
+```
+### 4.2.3.2 Random Forest — Scenario B
+
+```{r rf-b}
+set.seed(42)
+train_sample_b <- reg_train_post |> slice_sample(prop = 0.2)
+
+rf_model_b <- ranger(
+  arr_delay ~ .,
+  data          = train_sample_b,
+  num.trees     = 100,
+  mtry          = 5,
+  min.node.size = 20,
+  importance    = "impurity",
+  seed          = 42
+)
+
+rf_pred_b <- predict(rf_model_b, data = reg_test_post)$predictions
+
+rf_rmse_b <- sqrt(mean((reg_test_post$arr_delay - rf_pred_b)^2))
+rf_mae_b  <- mean(abs(reg_test_post$arr_delay - rf_pred_b))
+rf_rsq_b  <- cor(reg_test_post$arr_delay, rf_pred_b)^2
+
+cat("Random Forest (Post-Departure):\n")
+cat("RMSE:", round(rf_rmse_b, 3), "\n")
+cat("MAE: ", round(rf_mae_b,  3), "\n")
+cat("R²:  ", round(rf_rsq_b,  3), "\n")
+```
+## 4.2.4 Regression Model Comparison
+
+```{r reg_comparison}
+reg_results <- tibble(
+  Scenario = c(rep("A: Pre-Departure",  2),
+               rep("B: Post-Departure", 2)),
+  Model    = rep(c("Linear Regression", "Random Forest"), 2),
+  RMSE     = c(lm_rmse_a, rf_rmse_a, lm_rmse_b, rf_rmse_b),
+  MAE      = c(lm_mae_a,  rf_mae_a,  lm_mae_b,  rf_mae_b),
+  R2       = c(lm_rsq_a,  rf_rsq_a,  lm_rsq_b,  rf_rsq_b)
+) |>
+  mutate(across(c(RMSE, MAE, R2), ~ round(.x, 3)))
+
+reg_results |>
+  kable(caption  = "Regression model performance across both scenarios.",
+        col.names = c("Scenario", "Model", "RMSE", "MAE", "R²")) |>
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c("striped", "hover")) |>
+  collapse_rows(columns = 1, valign = "middle")
+```
+---
+## 4.2.5 Saving Regression Models
+
+```{r save-models}
+# Scenario A
+saveRDS(lm_model_a, "lm_model_pre.rds")
+saveRDS(rf_model_a, "rf_model_pre.rds")
+
+# Scenario B
+saveRDS(lm_model_b, "lm_model_post.rds")
+saveRDS(rf_model_b, "rf_model_post.rds")
+
+cat("All models saved successfully!\n")
+```
+## 4.2.6 Discussion
+
+### Scenario A — Pre-Departure
+
+The low R² values across both pre-departure models reflect the inherent difficulty of predicting flight delays using only information available before departure. Real-time operational disruptions — such as late incoming aircraft and air traffic control intervention — cannot be captured by weather and schedule features alone. Weather variables showed only weak linear correlations with arrival delay (r ≈ 0.03–0.04) during EDA, and features such as carrier, route, and time of day provide only a general population-level signal rather than flight-specific predictions. Despite modest absolute performance, Random Forest is expected to outperform Linear Regression, confirming that delay relationships are non-linear in nature — consistent with the non-linear weather effects and time-of-day patterns identified during exploratory analysis.
+
+### Scenario B — Post-Departure
+
+The inclusion of `dep_delay`, `taxi_out`, `taxi_in`, and `air_time` is expected to substantially improve both RMSE and R² across both models. Departure delay in particular acts as a near-direct signal of arrival delay (r = 0.97, EDA Phase 3), and its inclusion transforms the problem from a weak signal estimation task to a high-confidence operational calculation. This scenario is appropriate for real-time airline systems estimating gate-arrival times once a flight is airborne. The performance gap between Scenario A and Scenario B directly quantifies the informational value of post-departure operational data.
 
 # References
 
