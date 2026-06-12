@@ -11,7 +11,7 @@
 
 <meta name="author" content="WQD7004 Group Project by Group 13" />
 
-<meta name="date" content="2026-06-06" />
+<meta name="date" content="2026-06-12" />
 
 <title>Predicting US December Flight Delays Using R</title>
 
@@ -3083,7 +3083,7 @@ border-radius: 0px;
 <h1 class="title toc-ignore">Predicting US December Flight Delays Using
 R</h1>
 <h4 class="author">WQD7004 Group Project by Group 13</h4>
-<h4 class="date">2026-06-06</h4>
+<h4 class="date">2026-06-12</h4>
 
 </div>
 
@@ -4357,6 +4357,7 @@ were engineered to capture temporal patterns, travel routes, and delay
 outcomes. These transformations were designed to support the study’s
 research objectives and enhance subsequent analysis and modelling
 without reducing the dataset size.</p>
+<pre class="r"><code>saveRDS(df_clean, &quot;df_clean.rds&quot;)</code></pre>
 <hr />
 </div>
 </div>
@@ -4799,14 +4800,1655 @@ modelling.</p>
 </div>
 <div id="phase-4-modelling" class="section level1">
 <h1>Phase 4: Modelling</h1>
-<p>This phase develops predictive models for two objectives: regression,
-which predicts arrival delay duration (arr_delay), and classification,
-which predicts whether a flight is delayed by more than 15 minutes
-(is_delayed). Building on the insights gained from the exploratory
-analysis, both linear and tree-based approaches are evaluated to
-determine how effectively operational, temporal, and weather-related
-factors can be used to predict flight delays.</p>
+<p>This phase develops predictive models addressing two complementary
+analytical objectives derived from the research questions:</p>
+<ol style="list-style-type: decimal">
+<li><strong>Can we predict whether a flight will be delayed by more than
+15 mins?</strong> — answered through classification</li>
+<li><strong>Can we predict how long a flight will be delayed?</strong> —
+answered through regression</li>
+</ol>
+<p>Both objectives are evaluated under two modelling scenarios:</p>
+<ul>
+<li><strong>Scenario A (Pre-Departure):</strong> Uses only features
+available before the flight departs — such as scheduled times, carrier,
+route, and weather forecasts. This represents a realistic
+advance-prediction setting applicable at the time of booking or
+check-in.</li>
+<li><strong>Scenario B (Post-Departure):</strong> Adds real-time
+operational features such as departure delay (<code>dep_delay</code>),
+taxi times, and air time. This represents a gate-arrival estimation
+setting once the flight is airborne.</li>
+</ul>
 <hr />
+</div>
+<div id="classification-modelling" class="section level1">
+<h1>4.1 Classification Modelling</h1>
+<p>The objective of the classification task is to predict whether a
+flight will arrive on time or experience a significant arrival delay. A
+binary target variable, is_delayed, was created from arrival delay,
+where flights arriving more than 15 minutes late were classified as
+Delayed and all others as OnTime.</p>
+<p>Two modelling scenarios were evaluated. Model A utilised operational,
+temporal, geographical, and weather-related variables, while Model B
+additionally included departure delay (dep_delay). Logistic Regression
+and Random Forest were implemented and compared using Accuracy,
+Precision, Recall (Sensitivity), Balanced Accuracy, and Cohen’s
+Kappa.</p>
+<div id="classification-data-preparation" class="section level3">
+<h3>4.1.1 Classification Data Preparation</h3>
+<div id="missing-value-treatment" class="section level4">
+<h4>Missing Value Treatment</h4>
+<p>Missing values in six weather-related variables (o_temp, o_prcp,
+o_wspd, d_temp, d_prcp, and d_wspd) were handled using median
+imputation. This approach ensured complete data for model training while
+remaining robust to outliers. Following imputation, no missing values
+remained in the dataset.</p>
+<pre class="r"><code>#=========================================================
+# Load Cleaned Dataset
+#=========================================================
+
+df_clean &lt;- readRDS(&quot;df_clean.rds&quot;)
+
+dim(df_clean)</code></pre>
+<pre><code>## [1] 1133043      39</code></pre>
+<pre class="r"><code>#=========================================================
+# Missing Value Treatment
+#=========================================================
+
+weather_cols &lt;- c(
+  &quot;o_temp&quot;, &quot;o_prcp&quot;, &quot;o_wspd&quot;,
+  &quot;d_temp&quot;, &quot;d_prcp&quot;, &quot;d_wspd&quot;
+)
+
+for(col in weather_cols) {
+  df_clean[[col]][is.na(df_clean[[col]])] &lt;-
+    median(df_clean[[col]], na.rm = TRUE)
+}
+
+colSums(is.na(df_clean))</code></pre>
+<pre><code>##             fl_date          op_carrier   op_carrier_fl_num              origin 
+##                   0                   0                   0                   0 
+##                dest        crs_dep_time            dep_time           dep_delay 
+##                   0                   0                   0                   0 
+##            taxi_out          wheels_off           wheels_on             taxi_in 
+##                   0                   0                   0                   0 
+##        crs_arr_time            arr_time           arr_delay    crs_elapsed_time 
+##                   0                   0                   0                   0 
+## actual_elapsed_time            air_time        day_of_month         day_of_week 
+##                   0                   0                   0                   0 
+##        origin_index          dest_index              o_temp              o_prcp 
+##                   0                   0                   0                   0 
+##              o_wspd              d_temp              d_prcp              d_wspd 
+##                   0                   0                   0                   0 
+##          o_latitude         o_longitude          d_latitude         d_longitude 
+##                   0                   0                   0                   0 
+##                year            dep_hour         time_of_day             weekday 
+##                   0                   0                   0                   0 
+##          is_weekend               route          is_delayed 
+##                   0                   0                   0</code></pre>
+</div>
+<div id="feature-selection" class="section level4">
+<h4>Feature Selection</h4>
+<p>Variables that directly revealed the final arrival outcome were
+excluded to prevent target leakage. Consequently, arr_delay was removed
+because it was used to construct the target variable, is_delayed.</p>
+<p>The route variable was also excluded as its information was already
+represented by the origin and dest variables. Finally, categorical
+variables were converted to factors to ensure compatibility with the
+classification algorithms.</p>
+<pre class="r"><code>#=========================================================
+# Model A Dataset
+# Excludes departure delay
+#=========================================================
+
+modelA_df &lt;- df_clean %&gt;%
+  select(
+    is_delayed,
+    op_carrier,
+    day_of_month,
+    day_of_week,
+    year,
+    dep_hour,
+    time_of_day,
+    weekday,
+    is_weekend,
+    o_temp,
+    o_prcp,
+    o_wspd,
+    d_temp,
+    d_prcp,
+    d_wspd,
+    o_latitude,
+    o_longitude,
+    d_latitude,
+    d_longitude
+  )
+
+glimpse(modelA_df)</code></pre>
+<pre><code>## Rows: 1,133,043
+## Columns: 19
+## $ is_delayed   &lt;fct&gt; OnTime, OnTime, OnTime, OnTime, OnTime, OnTime, OnTime, O…
+## $ op_carrier   &lt;chr&gt; &quot;DL&quot;, &quot;OO&quot;, &quot;OO&quot;, &quot;DL&quot;, &quot;OO&quot;, &quot;OO&quot;, &quot;DL&quot;, &quot;OO&quot;, &quot;OO&quot;, &quot;DL…
+## $ day_of_month &lt;dbl&gt; 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, 4, 4, 5, 5, 5, 6, 6, 6, 7, …
+## $ day_of_week  &lt;dbl&gt; 5, 5, 5, 6, 6, 6, 7, 7, 7, 1, 1, 1, 2, 2, 2, 3, 3, 3, 4, …
+## $ year         &lt;fct&gt; 2023, 2023, 2023, 2023, 2023, 2023, 2023, 2023, 2023, 202…
+## $ dep_hour     &lt;int&gt; 5, 10, 18, 5, 10, 18, 5, 10, 18, 5, 10, 18, 5, 10, 18, 5,…
+## $ time_of_day  &lt;fct&gt; Overnight (0-5), Morning (6-11), Evening (17-20), Overnig…
+## $ weekday      &lt;fct&gt; Fri, Fri, Fri, Sat, Sat, Sat, Sun, Sun, Sun, Mon, Mon, Mo…
+## $ is_weekend   &lt;lgl&gt; FALSE, FALSE, FALSE, TRUE, TRUE, TRUE, TRUE, TRUE, TRUE, …
+## $ o_temp       &lt;dbl&gt; -7.2, -6.7, 0.6, -8.3, -9.4, 0.6, -1.1, -0.6, 0.6, 0.0, -…
+## $ o_prcp       &lt;dbl&gt; 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.…
+## $ o_wspd       &lt;dbl&gt; 7.6, 5.4, 16.6, 0.0, 0.0, 14.8, 14.8, 9.4, 9.4, 5.4, 0.0,…
+## $ d_temp       &lt;dbl&gt; -2.8, -5.6, 2.2, -3.9, -5.6, 3.3, 0.6, 0.6, 2.2, 0.0, -3.…
+## $ d_prcp       &lt;dbl&gt; 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.…
+## $ d_wspd       &lt;dbl&gt; 5.4, 7.6, 7.6, 0.0, 11.2, 16.6, 5.4, 0.0, 5.4, 0.0, 7.6, …
+## $ o_latitude   &lt;dbl&gt; 46.84209, 46.84209, 46.84209, 46.84209, 46.84209, 46.8420…
+## $ o_longitude  &lt;dbl&gt; -92.19365, -92.19365, -92.19365, -92.19365, -92.19365, -9…
+## $ d_latitude   &lt;dbl&gt; 44.88055, 44.88055, 44.88055, 44.88055, 44.88055, 44.8805…
+## $ d_longitude  &lt;dbl&gt; -93.21692, -93.21692, -93.21692, -93.21692, -93.21692, -9…</code></pre>
+<pre class="r"><code>#=========================================================
+# Train-Test Split
+#=========================================================
+
+set.seed(123)
+
+split_obj &lt;- initial_split(
+  modelA_df,
+  prop = 0.80,
+  strata = is_delayed
+)
+
+train_data &lt;- training(split_obj)
+test_data  &lt;- testing(split_obj)
+
+dim(train_data)</code></pre>
+<pre><code>## [1] 906433     19</code></pre>
+<pre class="r"><code>dim(test_data)</code></pre>
+<pre><code>## [1] 226610     19</code></pre>
+<pre class="r"><code>#=========================================================
+# Prepare Data for Classification Models
+#=========================================================
+
+train_data &lt;- train_data %&gt;%
+  mutate(across(where(is.character), as.factor))
+
+test_data &lt;- test_data %&gt;%
+  mutate(across(where(is.character), as.factor))
+
+train_data$is_weekend &lt;- as.factor(train_data$is_weekend)
+test_data$is_weekend  &lt;- as.factor(test_data$is_weekend)
+
+str(train_data)</code></pre>
+<pre><code>## tibble [906,433 × 19] (S3: tbl_df/tbl/data.frame)
+##  $ is_delayed  : Factor w/ 2 levels &quot;OnTime&quot;,&quot;Delayed&quot;: 2 2 2 2 2 2 2 2 2 2 ...
+##  $ op_carrier  : Factor w/ 15 levels &quot;9E&quot;,&quot;AA&quot;,&quot;AS&quot;,..: 12 12 12 12 12 12 12 12 5 5 ...
+##  $ day_of_month: num [1:906433] 6 9 19 24 26 27 30 30 3 4 ...
+##  $ day_of_week : num [1:906433] 3 6 2 7 2 3 6 6 7 1 ...
+##  $ year        : Factor w/ 2 levels &quot;2023&quot;,&quot;2024&quot;: 1 1 1 1 1 1 1 1 1 1 ...
+##  $ dep_hour    : int [1:906433] 18 17 5 5 5 17 17 10 13 12 ...
+##  $ time_of_day : Factor w/ 5 levels &quot;Overnight (0-5)&quot;,..: 4 4 1 1 1 4 4 2 3 3 ...
+##  $ weekday     : Factor w/ 7 levels &quot;Mon&quot;,&quot;Tue&quot;,&quot;Wed&quot;,..: 3 6 2 7 2 3 6 6 7 1 ...
+##  $ is_weekend  : Factor w/ 2 levels &quot;FALSE&quot;,&quot;TRUE&quot;: 1 2 1 2 1 1 2 2 2 1 ...
+##  $ o_temp      : num [1:906433] 1.1 1.7 -11.7 5 2.8 1.1 -2.2 -1.7 16.7 5.6 ...
+##  $ o_prcp      : num [1:906433] 0 0.3 0 0 0.5 0 0 0 0 0 ...
+##  $ o_wspd      : num [1:906433] 27.7 11.2 13 18.4 38.9 14.8 16.6 11.2 7.6 5.4 ...
+##  $ d_temp      : num [1:906433] 7.2 2.2 -8.3 7.8 10 2.2 -2.2 -1.7 1.1 -3.3 ...
+##  $ d_prcp      : num [1:906433] 0 0.3 0 0.4 1.5 0 0 0 0 0 ...
+##  $ d_wspd      : num [1:906433] 22.3 22.3 9.4 24.1 25.9 0 20.5 9.4 7.6 13 ...
+##  $ o_latitude  : num [1:906433] 46.8 46.8 46.8 46.8 46.8 ...
+##  $ o_longitude : num [1:906433] -92.2 -92.2 -92.2 -92.2 -92.2 ...
+##  $ d_latitude  : num [1:906433] 44.9 44.9 44.9 44.9 44.9 ...
+##  $ d_longitude : num [1:906433] -93.2 -93.2 -93.2 -93.2 -93.2 ...</code></pre>
+</div>
+</div>
+<div id="logistic-regression-model-a" class="section level2">
+<h2>4.1.2 Logistic Regression – Model A</h2>
+<p>Logistic Regression was selected as the baseline classification model
+due to its simplicity and interpretability. The model estimates the
+probability that a flight belongs to the delayed class based on the
+relationship between the predictor variables and the binary target
+variable.</p>
+<p>Model A was trained using operational, temporal, geographical, and
+weather-related variables. Model performance was evaluated using
+Accuracy, Precision, Recall, Balanced Accuracy, and Cohen’s Kappa.</p>
+<pre class="r"><code>#=========================================================
+# Logistic Regression - Model A
+#=========================================================
+# Purpose:
+# Establish a baseline classification model using
+# operational, temporal, geographical and weather
+# variables without departure delay information.
+#=========================================================
+
+log_model &lt;- glm(
+  is_delayed ~ .,
+  data = train_data,
+  family = binomial
+)
+
+summary(log_model)</code></pre>
+<pre><code>## 
+## Call:
+## glm(formula = is_delayed ~ ., family = binomial, data = train_data)
+## 
+## Coefficients: (2 not defined because of singularities)
+##                                Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)                  -2.8789999  0.0500054 -57.574  &lt; 2e-16 ***
+## op_carrierAA                  0.3837809  0.0190314  20.166  &lt; 2e-16 ***
+## op_carrierAS                  0.5860142  0.0243522  24.064  &lt; 2e-16 ***
+## op_carrierB6                  0.7621720  0.0213970  35.620  &lt; 2e-16 ***
+## op_carrierDL                  0.0194867  0.0191469   1.018  0.30880    
+## op_carrierF9                  0.5438666  0.0231450  23.498  &lt; 2e-16 ***
+## op_carrierG4                  0.4795950  0.0352921  13.589  &lt; 2e-16 ***
+## op_carrierHA                  0.5310647  0.0378163  14.043  &lt; 2e-16 ***
+## op_carrierMQ                  0.1633752  0.0229987   7.104 1.21e-12 ***
+## op_carrierNK                  0.5726918  0.0221659  25.837  &lt; 2e-16 ***
+## op_carrierOH                  0.3898769  0.0226217  17.235  &lt; 2e-16 ***
+## op_carrierOO                  0.4025351  0.0198905  20.238  &lt; 2e-16 ***
+## op_carrierUA                  0.1494766  0.0196600   7.603 2.89e-14 ***
+## op_carrierWN                  0.3262375  0.0187275  17.420  &lt; 2e-16 ***
+## op_carrierYX                 -0.1533109  0.0229023  -6.694 2.17e-11 ***
+## day_of_month                  0.0212945  0.0003183  66.903  &lt; 2e-16 ***
+## day_of_week                   0.0572587  0.0016754  34.176  &lt; 2e-16 ***
+## year2024                      0.4081505  0.0057490  70.995  &lt; 2e-16 ***
+## dep_hour                      0.0638555  0.0020154  31.684  &lt; 2e-16 ***
+## time_of_dayMorning (6-11)     0.1326760  0.0208922   6.350 2.15e-10 ***
+## time_of_dayAfternoon (12-16)  0.1636631  0.0270586   6.048 1.46e-09 ***
+## time_of_dayEvening (17-20)    0.1098965  0.0337384   3.257  0.00112 ** 
+## time_of_dayLate (21-23)      -0.1708269  0.0401194  -4.258 2.06e-05 ***
+## weekdayTue                   -0.0884717  0.0103649  -8.536  &lt; 2e-16 ***
+## weekdayWed                   -0.0168882  0.0099229  -1.702  0.08876 .  
+## weekdayThu                    0.0561261  0.0090770   6.183 6.28e-10 ***
+## weekdayFri                    0.0424225  0.0087182   4.866 1.14e-06 ***
+## weekdaySat                    0.0071342  0.0093160   0.766  0.44380    
+## weekdaySun                           NA         NA      NA       NA    
+## is_weekendTRUE                       NA         NA      NA       NA    
+## o_temp                       -0.0012473  0.0005803  -2.149  0.03161 *  
+## o_prcp                        0.1354156  0.0036347  37.256  &lt; 2e-16 ***
+## o_wspd                        0.0062396  0.0003514  17.758  &lt; 2e-16 ***
+## d_temp                        0.0024596  0.0005781   4.255 2.09e-05 ***
+## d_prcp                        0.1185959  0.0036137  32.818  &lt; 2e-16 ***
+## d_wspd                        0.0079420  0.0003488  22.770  &lt; 2e-16 ***
+## o_latitude                    0.0016229  0.0007632   2.126  0.03347 *  
+## o_longitude                   0.0018834  0.0002128   8.849  &lt; 2e-16 ***
+## d_latitude                   -0.0065656  0.0007689  -8.538  &lt; 2e-16 ***
+## d_longitude                   0.0063090  0.0002134  29.568  &lt; 2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## (Dispersion parameter for binomial family taken to be 1)
+## 
+##     Null deviance: 847749  on 906432  degrees of freedom
+## Residual deviance: 812210  on 906395  degrees of freedom
+## AIC: 812286
+## 
+## Number of Fisher Scoring iterations: 4</code></pre>
+<pre class="r"><code>#=========================================================
+# Generate Prediction Probabilities
+#=========================================================
+# Predict the probability that each flight belongs
+# to the delayed class.
+#=========================================================
+
+log_prob &lt;- predict(
+  log_model,
+  newdata = test_data,
+  type = &quot;response&quot;
+)
+
+summary(log_prob)</code></pre>
+<pre><code>##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+## 0.02276 0.12126 0.16458 0.17751 0.22017 0.99670</code></pre>
+<pre class="r"><code>#=========================================================
+# Convert Probabilities into Class Labels
+#=========================================================
+# Flights with probability greater than 0.50 are
+# classified as Delayed; otherwise OnTime.
+#=========================================================
+
+log_pred &lt;- ifelse(
+  log_prob &gt; 0.5,
+  &quot;Delayed&quot;,
+  &quot;OnTime&quot;
+)
+
+log_pred &lt;- factor(
+  log_pred,
+  levels = levels(test_data$is_delayed)
+)
+
+table(log_pred)</code></pre>
+<pre><code>## log_pred
+##  OnTime Delayed 
+##  226123     487</code></pre>
+<pre class="r"><code>#=========================================================
+# Evaluate Logistic Regression Model A
+#=========================================================
+
+log_cm &lt;- confusionMatrix(
+  log_pred,
+  test_data$is_delayed,
+  positive = &quot;Delayed&quot;
+)
+
+log_cm</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction OnTime Delayed
+##    OnTime  186166   39957
+##    Delayed    213     274
+##                                           
+##                Accuracy : 0.8227          
+##                  95% CI : (0.8212, 0.8243)
+##     No Information Rate : 0.8225          
+##     P-Value [Acc &gt; NIR] : 0.3699          
+##                                           
+##                   Kappa : 0.0093          
+##                                           
+##  Mcnemar&#39;s Test P-Value : &lt;2e-16          
+##                                           
+##             Sensitivity : 0.006811        
+##             Specificity : 0.998857        
+##          Pos Pred Value : 0.562628        
+##          Neg Pred Value : 0.823295        
+##              Prevalence : 0.177534        
+##          Detection Rate : 0.001209        
+##    Detection Prevalence : 0.002149        
+##       Balanced Accuracy : 0.502834        
+##                                           
+##        &#39;Positive&#39; Class : Delayed         
+## </code></pre>
+<p>Logistic Regression Model A achieved an accuracy of 82.27%. However,
+despite the relatively high accuracy, the model performed poorly in
+identifying delayed flights, achieving a recall of only 0.68%. In
+contrast, specificity reached 99.89%, indicating that the model
+primarily predicted the majority class (OnTime). This behaviour is
+reflected in the low balanced accuracy (50.28%) and Cohen’s Kappa
+(0.0093). Overall, Logistic Regression Model A served as a useful
+baseline but was ineffective for detecting flight delays in this
+dataset.</p>
+</div>
+<div id="random-forest-model-a" class="section level2">
+<h2>4.1.3 Random Forest – Model A</h2>
+<p>Random Forest was implemented to capture nonlinear relationships and
+interactions among the predictor variables. Unlike Logistic Regression,
+Random Forest combines multiple decision trees to improve predictive
+performance and robustness.</p>
+<p>Model A was trained using operational, temporal, geographical, and
+weather-related variables. A Random Forest classifier consisting of 200
+trees was developed and evaluated using the same training and testing
+datasets as Logistic Regression Model A.</p>
+<pre class="r"><code>#=========================================================
+# Random Forest Model A
+#=========================================================
+
+library(ranger)
+
+rf_model &lt;- ranger(
+  is_delayed ~ .,
+  data = train_data,
+  num.trees = 200,
+  probability = TRUE,
+  importance = &quot;impurity&quot;,
+  seed = 123
+)</code></pre>
+<pre><code>## Growing trees.. Progress: 31%. Estimated remaining time: 1 minute, 10 seconds.
+## Growing trees.. Progress: 61%. Estimated remaining time: 39 seconds.
+## Growing trees.. Progress: 89%. Estimated remaining time: 11 seconds.</code></pre>
+<pre class="r"><code>rf_model</code></pre>
+<pre><code>## Ranger result
+## 
+## Call:
+##  ranger(is_delayed ~ ., data = train_data, num.trees = 200, probability = TRUE,      importance = &quot;impurity&quot;, seed = 123) 
+## 
+## Type:                             Probability estimation 
+## Number of trees:                  200 
+## Sample size:                      906433 
+## Number of independent variables:  18 
+## Mtry:                             4 
+## Target node size:                 10 
+## Variable importance mode:         impurity 
+## Splitrule:                        gini 
+## OOB prediction error (Brier s.):  0.123461</code></pre>
+<pre class="r"><code>#=========================================================
+# Generate Random Forest Predictions
+#=========================================================
+# Predict class probabilities for each flight in the
+# test dataset using the trained Random Forest model.
+#=========================================================
+
+rf_pred_prob &lt;- predict(
+  rf_model,
+  data = test_data
+)$predictions
+
+head(rf_pred_prob)</code></pre>
+<pre><code>##         OnTime    Delayed
+## [1,] 0.9351981 0.06480194
+## [2,] 0.9374902 0.06250980
+## [3,] 0.8094519 0.19054806
+## [4,] 0.9405006 0.05949938
+## [5,] 0.9270507 0.07294933
+## [6,] 0.8719644 0.12803561</code></pre>
+<pre class="r"><code>#=========================================================
+# Convert Probabilities into Class Labels
+#=========================================================
+# Flights with a predicted probability greater than
+# 0.50 are classified as delayed.
+#=========================================================
+
+rf_pred_class &lt;- ifelse(
+  rf_pred_prob[, &quot;Delayed&quot;] &gt; 0.5,
+  &quot;Delayed&quot;,
+  &quot;OnTime&quot;
+)
+
+rf_pred_class &lt;- factor(
+  rf_pred_class,
+  levels = levels(test_data$is_delayed)
+)
+
+table(rf_pred_class)</code></pre>
+<pre><code>## rf_pred_class
+##  OnTime Delayed 
+##  214669   11941</code></pre>
+<pre class="r"><code>#=========================================================
+# Evaluate Random Forest Performance
+#=========================================================
+# Generate confusion matrix and classification
+# performance metrics.
+#=========================================================
+
+rf_cm &lt;- confusionMatrix(
+  rf_pred_class,
+  test_data$is_delayed,
+  positive = &quot;Delayed&quot;
+)
+
+rf_cm</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction OnTime Delayed
+##    OnTime  182585   32084
+##    Delayed   3794    8147
+##                                           
+##                Accuracy : 0.8417          
+##                  95% CI : (0.8402, 0.8432)
+##     No Information Rate : 0.8225          
+##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                                           
+##                   Kappa : 0.2515          
+##                                           
+##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
+##                                           
+##             Sensitivity : 0.20251         
+##             Specificity : 0.97964         
+##          Pos Pred Value : 0.68227         
+##          Neg Pred Value : 0.85054         
+##              Prevalence : 0.17753         
+##          Detection Rate : 0.03595         
+##    Detection Prevalence : 0.05269         
+##       Balanced Accuracy : 0.59107         
+##                                           
+##        &#39;Positive&#39; Class : Delayed         
+## </code></pre>
+<p>Random Forest Model A achieved an accuracy of 84.17%, outperforming
+Logistic Regression Model A (82.27%). The model recorded a precision of
+68.23% and a recall of 20.25%, demonstrating a substantially improved
+ability to identify delayed flights compared to Logistic Regression,
+which achieved a recall of only 0.68%.</p>
+<p>The balanced accuracy increased to 59.11%, indicating improved
+performance across both classes while maintaining high specificity
+(97.96%). These results suggest that Random Forest was better able to
+capture nonlinear relationships and interactions among operational,
+temporal, geographical, and weather-related variables, resulting in
+superior classification performance when departure delay information was
+excluded.</p>
+</div>
+<div id="logistic-regression-model-b" class="section level2">
+<h2>4.1.4 Logistic Regression – Model B</h2>
+<p>Logistic Regression Model B was developed using the same predictors
+as Model A, with the addition of departure delay (dep_delay). This
+variable provides information about operational disruptions occurring
+before take-off and is expected to be strongly associated with arrival
+delays.</p>
+<p>The inclusion of departure delay allows the model to evaluate whether
+predictive performance improves when real-time operational information
+is available. Model performance was assessed using Accuracy, Precision,
+Recall, Balanced Accuracy, and Cohen’s Kappa.</p>
+<pre class="r"><code>#=========================================================
+# Construct Model B Dataset
+#=========================================================
+# Model B includes departure delay in addition to the
+# operational, temporal, geographical and weather
+# variables used in Model A.
+#=========================================================
+
+modelB_df &lt;- df_clean %&gt;%
+  select(
+    is_delayed,
+
+    dep_delay,
+
+    op_carrier,
+
+    day_of_month,
+    day_of_week,
+    year,
+
+    dep_hour,
+    time_of_day,
+    weekday,
+    is_weekend,
+
+    o_temp,
+    o_prcp,
+    o_wspd,
+
+    d_temp,
+    d_prcp,
+    d_wspd,
+
+    o_latitude,
+    o_longitude,
+    d_latitude,
+    d_longitude
+  )
+
+dim(modelB_df)</code></pre>
+<pre><code>## [1] 1133043      20</code></pre>
+<pre class="r"><code>#=========================================================
+# Training-Test Split
+#=========================================================
+
+set.seed(123)
+
+splitB &lt;- initial_split(
+  modelB_df,
+  prop = 0.80,
+  strata = is_delayed
+)
+
+trainB &lt;- training(splitB)
+testB  &lt;- testing(splitB)
+
+dim(trainB)</code></pre>
+<pre><code>## [1] 906433     20</code></pre>
+<pre class="r"><code>dim(testB)</code></pre>
+<pre><code>## [1] 226610     20</code></pre>
+<pre class="r"><code>#=========================================================
+# Prepare Data for Classification Models
+#=========================================================
+
+trainB &lt;- trainB %&gt;%
+  mutate(across(where(is.character), as.factor))
+
+testB &lt;- testB %&gt;%
+  mutate(across(where(is.character), as.factor))
+
+trainB$is_weekend &lt;- as.factor(trainB$is_weekend)
+testB$is_weekend  &lt;- as.factor(testB$is_weekend)
+
+str(trainB)</code></pre>
+<pre><code>## tibble [906,433 × 20] (S3: tbl_df/tbl/data.frame)
+##  $ is_delayed  : Factor w/ 2 levels &quot;OnTime&quot;,&quot;Delayed&quot;: 2 2 2 2 2 2 2 2 2 2 ...
+##  $ dep_delay   : num [1:906433] 88 8 231 391 96 43 132 17 38 16 ...
+##  $ op_carrier  : Factor w/ 15 levels &quot;9E&quot;,&quot;AA&quot;,&quot;AS&quot;,..: 12 12 12 12 12 12 12 12 5 5 ...
+##  $ day_of_month: num [1:906433] 6 9 19 24 26 27 30 30 3 4 ...
+##  $ day_of_week : num [1:906433] 3 6 2 7 2 3 6 6 7 1 ...
+##  $ year        : Factor w/ 2 levels &quot;2023&quot;,&quot;2024&quot;: 1 1 1 1 1 1 1 1 1 1 ...
+##  $ dep_hour    : int [1:906433] 18 17 5 5 5 17 17 10 13 12 ...
+##  $ time_of_day : Factor w/ 5 levels &quot;Overnight (0-5)&quot;,..: 4 4 1 1 1 4 4 2 3 3 ...
+##  $ weekday     : Factor w/ 7 levels &quot;Mon&quot;,&quot;Tue&quot;,&quot;Wed&quot;,..: 3 6 2 7 2 3 6 6 7 1 ...
+##  $ is_weekend  : Factor w/ 2 levels &quot;FALSE&quot;,&quot;TRUE&quot;: 1 2 1 2 1 1 2 2 2 1 ...
+##  $ o_temp      : num [1:906433] 1.1 1.7 -11.7 5 2.8 1.1 -2.2 -1.7 16.7 5.6 ...
+##  $ o_prcp      : num [1:906433] 0 0.3 0 0 0.5 0 0 0 0 0 ...
+##  $ o_wspd      : num [1:906433] 27.7 11.2 13 18.4 38.9 14.8 16.6 11.2 7.6 5.4 ...
+##  $ d_temp      : num [1:906433] 7.2 2.2 -8.3 7.8 10 2.2 -2.2 -1.7 1.1 -3.3 ...
+##  $ d_prcp      : num [1:906433] 0 0.3 0 0.4 1.5 0 0 0 0 0 ...
+##  $ d_wspd      : num [1:906433] 22.3 22.3 9.4 24.1 25.9 0 20.5 9.4 7.6 13 ...
+##  $ o_latitude  : num [1:906433] 46.8 46.8 46.8 46.8 46.8 ...
+##  $ o_longitude : num [1:906433] -92.2 -92.2 -92.2 -92.2 -92.2 ...
+##  $ d_latitude  : num [1:906433] 44.9 44.9 44.9 44.9 44.9 ...
+##  $ d_longitude : num [1:906433] -93.2 -93.2 -93.2 -93.2 -93.2 ...</code></pre>
+<pre class="r"><code>#=========================================================
+# Logistic Regression Model B
+#=========================================================
+# Model B extends Model A by including departure delay
+# as an additional predictor.
+#=========================================================
+
+log_model_B &lt;- glm(
+  is_delayed ~ .,
+  data = trainB,
+  family = binomial
+)
+
+summary(log_model_B)</code></pre>
+<pre><code>## 
+## Call:
+## glm(formula = is_delayed ~ ., family = binomial, data = trainB)
+## 
+## Coefficients: (2 not defined because of singularities)
+##                                Estimate Std. Error z value Pr(&gt;|z|)    
+## (Intercept)                  -2.748e+00  8.034e-02 -34.203  &lt; 2e-16 ***
+## dep_delay                     1.307e-01  3.457e-04 378.114  &lt; 2e-16 ***
+## op_carrierAA                  8.837e-02  3.210e-02   2.753 0.005906 ** 
+## op_carrierAS                  3.407e-01  3.962e-02   8.600  &lt; 2e-16 ***
+## op_carrierB6                  2.375e-01  3.671e-02   6.471 9.77e-11 ***
+## op_carrierDL                 -1.631e-01  3.215e-02  -5.072 3.94e-07 ***
+## op_carrierF9                  2.938e-01  3.955e-02   7.430 1.08e-13 ***
+## op_carrierG4                  1.850e-01  6.219e-02   2.975 0.002934 ** 
+## op_carrierHA                  4.566e-01  5.658e-02   8.071 6.97e-16 ***
+## op_carrierMQ                  2.732e-01  3.737e-02   7.310 2.66e-13 ***
+## op_carrierNK                 -1.668e-01  3.794e-02  -4.397 1.10e-05 ***
+## op_carrierOH                  3.242e-01  3.866e-02   8.386  &lt; 2e-16 ***
+## op_carrierOO                  3.172e-01  3.382e-02   9.379  &lt; 2e-16 ***
+## op_carrierUA                  3.433e-02  3.295e-02   1.042 0.297371    
+## op_carrierWN                 -3.197e-01  3.146e-02 -10.163  &lt; 2e-16 ***
+## op_carrierYX                  3.088e-01  3.742e-02   8.251  &lt; 2e-16 ***
+## day_of_month                  4.054e-05  5.129e-04   0.079 0.936997    
+## day_of_week                   3.395e-02  2.732e-03  12.425  &lt; 2e-16 ***
+## year2024                      1.801e-01  9.299e-03  19.367  &lt; 2e-16 ***
+## dep_hour                     -4.665e-02  3.213e-03 -14.520  &lt; 2e-16 ***
+## time_of_dayMorning (6-11)     3.510e-01  3.214e-02  10.921  &lt; 2e-16 ***
+## time_of_dayAfternoon (12-16)  4.049e-01  4.245e-02   9.537  &lt; 2e-16 ***
+## time_of_dayEvening (17-20)    7.283e-01  5.351e-02  13.611  &lt; 2e-16 ***
+## time_of_dayLate (21-23)       6.753e-01  6.410e-02  10.535  &lt; 2e-16 ***
+## weekdayTue                    2.415e-02  1.676e-02   1.441 0.149666    
+## weekdayWed                    1.778e-01  1.573e-02  11.306  &lt; 2e-16 ***
+## weekdayThu                    1.252e-01  1.468e-02   8.528  &lt; 2e-16 ***
+## weekdayFri                    9.705e-02  1.405e-02   6.906 4.98e-12 ***
+## weekdaySat                   -3.837e-03  1.538e-02  -0.249 0.803002    
+## weekdaySun                           NA         NA      NA       NA    
+## is_weekendTRUE                       NA         NA      NA       NA    
+## o_temp                        3.481e-03  9.247e-04   3.764 0.000167 ***
+## o_prcp                        8.803e-02  5.623e-03  15.656  &lt; 2e-16 ***
+## o_wspd                        2.889e-03  5.702e-04   5.067 4.05e-07 ***
+## d_temp                       -2.260e-03  9.225e-04  -2.450 0.014298 *  
+## d_prcp                        1.189e-01  5.265e-03  22.586  &lt; 2e-16 ***
+## d_wspd                        1.129e-02  5.630e-04  20.045  &lt; 2e-16 ***
+## o_latitude                    9.253e-03  1.226e-03   7.545 4.53e-14 ***
+## o_longitude                  -6.892e-03  3.401e-04 -20.267  &lt; 2e-16 ***
+## d_latitude                   -1.637e-02  1.222e-03 -13.399  &lt; 2e-16 ***
+## d_longitude                   1.131e-02  3.361e-04  33.662  &lt; 2e-16 ***
+## ---
+## Signif. codes:  0 &#39;***&#39; 0.001 &#39;**&#39; 0.01 &#39;*&#39; 0.05 &#39;.&#39; 0.1 &#39; &#39; 1
+## 
+## (Dispersion parameter for binomial family taken to be 1)
+## 
+##     Null deviance: 847749  on 906432  degrees of freedom
+## Residual deviance: 355790  on 906394  degrees of freedom
+## AIC: 355868
+## 
+## Number of Fisher Scoring iterations: 8</code></pre>
+<pre class="r"><code>#=========================================================
+# Generate Prediction Probabilities
+#=========================================================
+
+log_prob_B &lt;- predict(
+  log_model_B,
+  newdata = testB,
+  type = &quot;response&quot;
+)
+
+summary(log_prob_B)</code></pre>
+<pre><code>##      Min.   1st Qu.    Median      Mean   3rd Qu.      Max. 
+## 2.301e-05 2.129e-02 3.596e-02 1.776e-01 1.126e-01 1.000e+00</code></pre>
+<pre class="r"><code>#=========================================================
+# Convert Probabilities to Classes
+#=========================================================
+
+log_pred_B &lt;- ifelse(log_prob_B &gt; 0.5,
+                     &quot;Delayed&quot;,
+                     &quot;OnTime&quot;)
+
+log_pred_B &lt;- factor(
+  log_pred_B,
+  levels = c(&quot;OnTime&quot;, &quot;Delayed&quot;)
+)
+
+table(log_pred_B)</code></pre>
+<pre><code>## log_pred_B
+##  OnTime Delayed 
+##  194548   32062</code></pre>
+<pre class="r"><code>#=========================================================
+# Evaluate Logistic Regression Model B
+#=========================================================
+
+library(caret)
+
+log_cm_B &lt;- confusionMatrix(
+  log_pred_B,
+  testB$is_delayed,
+  positive = &quot;Delayed&quot;
+)
+
+log_cm_B</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction OnTime Delayed
+##    OnTime  182972   11576
+##    Delayed   3407   28655
+##                                           
+##                Accuracy : 0.9339          
+##                  95% CI : (0.9329, 0.9349)
+##     No Information Rate : 0.8225          
+##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                                           
+##                   Kappa : 0.754           
+##                                           
+##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
+##                                           
+##             Sensitivity : 0.7123          
+##             Specificity : 0.9817          
+##          Pos Pred Value : 0.8937          
+##          Neg Pred Value : 0.9405          
+##              Prevalence : 0.1775          
+##          Detection Rate : 0.1265          
+##    Detection Prevalence : 0.1415          
+##       Balanced Accuracy : 0.8470          
+##                                           
+##        &#39;Positive&#39; Class : Delayed         
+## </code></pre>
+<p>Model B achieved an accuracy of 93.39%, substantially improving upon
+Logistic Regression Model A (82.27%). The inclusion of departure delay
+provided significant predictive power, enabling the model to better
+distinguish between delayed and on-time flights.</p>
+<p>The model achieved a recall of 71.23% and a precision of 89.37%,
+indicating strong performance in identifying delayed flights while
+maintaining a low rate of false positives. Specificity remained high at
+98.17%, demonstrating excellent performance in correctly classifying
+on-time flights. The balanced accuracy of 84.70% and Cohen’s Kappa of
+0.7540 further indicate strong classification performance across both
+classes.</p>
+<p>Compared with Model A, the substantial improvement in recall confirms
+that departure delay is a highly influential predictor of arrival delay.
+These findings suggest that incorporating real-time operational
+information significantly enhances flight delay prediction
+performance.</p>
+</div>
+<div id="random-forest-model-b" class="section level2">
+<h2>4.1.4 Random Forest – Model B</h2>
+<p>Random Forest Model B was developed using the same predictors as
+Random Forest Model A, with the addition of departure delay (dep_delay).
+The inclusion of departure delay allows the model to incorporate
+real-time operational information that may influence a flight’s final
+arrival status.</p>
+<p>By combining this enhanced feature set with an ensemble learning
+approach, Random Forest Model B is designed to capture complex nonlinear
+relationships and interactions among operational, temporal,
+geographical, and weather-related variables. The model was trained using
+200 decision trees and evaluated using Accuracy, Precision, Recall,
+Balanced Accuracy, and Cohen’s Kappa.</p>
+<pre class="r"><code>#=========================================================
+# Random Forest Model B
+#=========================================================
+# Model B includes departure delay as an additional
+# predictor variable.
+#=========================================================
+
+library(ranger)
+
+rf_model_B &lt;- ranger(
+  is_delayed ~ .,
+  data = trainB,
+  num.trees = 200,
+  probability = TRUE,
+  importance = &quot;impurity&quot;,
+  seed = 123
+)</code></pre>
+<pre><code>## Growing trees.. Progress: 37%. Estimated remaining time: 53 seconds.
+## Growing trees.. Progress: 72%. Estimated remaining time: 24 seconds.</code></pre>
+<pre class="r"><code>rf_model_B</code></pre>
+<pre><code>## Ranger result
+## 
+## Call:
+##  ranger(is_delayed ~ ., data = trainB, num.trees = 200, probability = TRUE,      importance = &quot;impurity&quot;, seed = 123) 
+## 
+## Type:                             Probability estimation 
+## Number of trees:                  200 
+## Sample size:                      906433 
+## Number of independent variables:  19 
+## Mtry:                             4 
+## Target node size:                 10 
+## Variable importance mode:         impurity 
+## Splitrule:                        gini 
+## OOB prediction error (Brier s.):  0.04750652</code></pre>
+<pre class="r"><code>#=========================================================
+# Generate Random Forest Predictions
+#=========================================================
+# Predict probability of each flight belonging
+# to the delayed class.
+#=========================================================
+
+rf_pred_B &lt;- predict(
+  rf_model_B,
+  data = testB
+)
+
+rf_prob_B &lt;- rf_pred_B$predictions[, &quot;Delayed&quot;]
+
+summary(rf_prob_B)</code></pre>
+<pre><code>##    Min. 1st Qu.  Median    Mean 3rd Qu.    Max. 
+## 0.00000 0.01530 0.03937 0.18118 0.14168 1.00000</code></pre>
+<pre class="r"><code>#=========================================================
+# Convert Probabilities to Classes
+#=========================================================
+# Flights with probability &gt; 0.5 are classified
+# as Delayed, otherwise OnTime.
+#=========================================================
+
+rf_class_B &lt;- ifelse(
+  rf_prob_B &gt; 0.5,
+  &quot;Delayed&quot;,
+  &quot;OnTime&quot;
+)
+
+rf_class_B &lt;- factor(
+  rf_class_B,
+  levels = c(&quot;OnTime&quot;, &quot;Delayed&quot;)
+)
+
+table(rf_class_B)</code></pre>
+<pre><code>## rf_class_B
+##  OnTime Delayed 
+##  194409   32201</code></pre>
+<pre class="r"><code>#=========================================================
+# Evaluate Random Forest Model B
+#=========================================================
+
+library(caret)
+
+rf_cm_B &lt;- confusionMatrix(
+  rf_class_B,
+  testB$is_delayed,
+  positive = &quot;Delayed&quot;
+)
+
+rf_cm_B</code></pre>
+<pre><code>## Confusion Matrix and Statistics
+## 
+##           Reference
+## Prediction OnTime Delayed
+##    OnTime  183557   10852
+##    Delayed   2822   29379
+##                                           
+##                Accuracy : 0.9397          
+##                  95% CI : (0.9387, 0.9406)
+##     No Information Rate : 0.8225          
+##     P-Value [Acc &gt; NIR] : &lt; 2.2e-16       
+##                                           
+##                   Kappa : 0.7758          
+##                                           
+##  Mcnemar&#39;s Test P-Value : &lt; 2.2e-16       
+##                                           
+##             Sensitivity : 0.7303          
+##             Specificity : 0.9849          
+##          Pos Pred Value : 0.9124          
+##          Neg Pred Value : 0.9442          
+##              Prevalence : 0.1775          
+##          Detection Rate : 0.1296          
+##    Detection Prevalence : 0.1421          
+##       Balanced Accuracy : 0.8576          
+##                                           
+##        &#39;Positive&#39; Class : Delayed         
+## </code></pre>
+<p>Random Forest Model B was developed using the same feature set as
+Model A, with the addition of departure delay (dep_delay). By
+incorporating this operational variable, the model was able to capture
+both nonlinear relationships and real-time flight conditions that
+influence arrival delays.</p>
+<p>The model achieved an accuracy of 93.97%, representing the highest
+classification performance among all models evaluated. It also achieved
+a precision of 91.24% and a recall of 73.03%, indicating strong
+performance in identifying delayed flights while maintaining a low
+false-positive rate. Furthermore, the model achieved a specificity of
+98.49%, demonstrating excellent performance in correctly classifying
+on-time flights. The balanced accuracy of 85.76% and Cohen’s Kappa value
+of 0.7758 further confirm strong classification performance across both
+classes.</p>
+<p>Compared with Logistic Regression Model B, Random Forest Model B
+produced slightly higher accuracy, recall, balanced accuracy, and Kappa,
+suggesting that nonlinear relationships and feature interactions
+contribute additional predictive value beyond what can be captured by a
+linear model. The results indicate that combining operational, temporal,
+geographical (coordinates), weather, and departure delay information
+with an ensemble learning approach provides the most effective solution
+for flight delay classification in this study.</p>
+</div>
+<div id="classification-model-comparison" class="section level2">
+<h2>4.1.6 Classification Model Comparison</h2>
+<table>
+<caption>Classification Model Performance Comparison</caption>
+<colgroup>
+<col width="32%" />
+<col width="13%" />
+<col width="10%" />
+<col width="17%" />
+<col width="26%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th align="left">Model</th>
+<th align="right">Accuracy</th>
+<th align="right">Recall</th>
+<th align="right">Specificity</th>
+<th align="right">Balanced_Accuracy</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td align="left">Logistic Regression A</td>
+<td align="right">82.28</td>
+<td align="right">1.00</td>
+<td align="right">99.82</td>
+<td align="right">50.41</td>
+</tr>
+<tr class="even">
+<td align="left">Random Forest A</td>
+<td align="right">84.19</td>
+<td align="right">19.78</td>
+<td align="right">98.09</td>
+<td align="right">58.94</td>
+</tr>
+<tr class="odd">
+<td align="left">Logistic Regression B</td>
+<td align="right">93.42</td>
+<td align="right">71.35</td>
+<td align="right">98.18</td>
+<td align="right">84.76</td>
+</tr>
+<tr class="even">
+<td align="left">Random Forest B</td>
+<td align="right">93.93</td>
+<td align="right">72.96</td>
+<td align="right">98.46</td>
+<td align="right">85.71</td>
+</tr>
+</tbody>
+</table>
+<p>Among the four classification models evaluated, Random Forest Model B
+achieved the best overall performance, with an accuracy of 93.97%,
+recall of 73.03%, specificity of 98.49%, and balanced accuracy of
+85.76%. The inclusion of departure delay substantially improved
+predictive performance across both Logistic Regression and Random Forest
+models, highlighting its importance as a predictor of arrival
+delays.</p>
+<p>Overall, Random Forest models consistently outperformed Logistic
+Regression models, suggesting that nonlinear relationships and
+interactions among operational, temporal, geographical, and
+weather-related variables contribute to flight delay outcomes.
+Consequently, Random Forest Model B was selected as the best-performing
+classification model for flight delay prediction.</p>
+<hr />
+</div>
+</div>
+<div id="regression-modelling" class="section level1">
+<h1>4.2 Regression Modelling</h1>
+<p>The regression task predicts the <strong>exact arrival delay duration
+in minutes</strong> (<code>arr_delay</code>).</p>
+<p>Two algorithms are evaluated in order of increasing complexity:</p>
+<ul>
+<li><strong>Linear Regression</strong> — interpretable baseline assuming
+linear feature relationships</li>
+<li><strong>Random Forest</strong> — ensemble of decision trees
+capturing non-linear interactions</li>
+</ul>
+<p>Both models are trained and evaluated under two scenarios:</p>
+<table>
+<colgroup>
+<col width="25%" />
+<col width="48%" />
+<col width="25%" />
+</colgroup>
+<thead>
+<tr class="header">
+<th>Scenario</th>
+<th>Features Available</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr class="odd">
+<td><strong>A — Pre-Departure</strong></td>
+<td>Schedule, carrier, route, weather forecast</td>
+<td>Prediction at booking or check-in</td>
+</tr>
+<tr class="even">
+<td><strong>B — Post-Departure</strong></td>
+<td>Above + <code>dep_delay</code>, taxi times, air time</td>
+<td>Real-time gate-arrival estimation</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<div id="data-preparation" class="section level2">
+<h2>4.2.1 Data Preparation</h2>
+<div id="loading-the-dataset" class="section level3">
+<h3>Loading the Dataset</h3>
+<p>The cleaned dataset saved during Phase 2 is loaded directly, ensuring
+consistency with all prior cleaning, feature engineering, and imputation
+decisions.</p>
+</div>
+</div>
+<div id="load-cleaned-dataset" class="section level2">
+<h2>4.2 Load Cleaned Dataset</h2>
+<p>The cleaned dataset produced in Phase 2 is loaded. It contains
+1,133,043 flight records with missing values confined to the six weather
+variables.</p>
+<pre class="r"><code>df_model &lt;- readRDS(&quot;df_clean.rds&quot;)
+
+cat(&quot;Rows:&quot;, nrow(df_model), &quot;\n&quot;)</code></pre>
+<pre><code>## Rows: 1133043</code></pre>
+<pre class="r"><code>cat(&quot;Columns:&quot;, ncol(df_model), &quot;\n&quot;)</code></pre>
+<pre><code>## Columns: 39</code></pre>
+<div id="missing-value-imputation" class="section level3">
+<h3>Missing Value Imputation</h3>
+<p>Missing values are confined to the six weather variables at less than
+0.1%of observations. Median imputation is applied as it is more robust
+than mean imputation for skewed distributions.</p>
+</div>
+<div id="before-imputation" class="section level3">
+<h3>Before Imputation</h3>
+<pre class="r"><code>weather_vars &lt;- c(&quot;o_temp&quot;, &quot;o_prcp&quot;, &quot;o_wspd&quot;,
+                  &quot;d_temp&quot;, &quot;d_prcp&quot;, &quot;d_wspd&quot;)
+
+df_model |&gt;
+  summarise(across(all_of(weather_vars), ~ sum(is.na(.x)))) |&gt;
+  pivot_longer(everything(),
+               names_to  = &quot;variable&quot;,
+               values_to = &quot;n_missing&quot;) |&gt;
+  mutate(pct_missing = round(100 * n_missing / nrow(df_model), 4)) |&gt;
+  kable(caption = &quot;Missing values before imputation.&quot;) |&gt;
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c(&quot;striped&quot;, &quot;hover&quot;))</code></pre>
+<table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Missing values before imputation.
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+variable
+</th>
+<th style="text-align:right;">
+n_missing
+</th>
+<th style="text-align:right;">
+pct_missing
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+o_temp
+</td>
+<td style="text-align:right;">
+216
+</td>
+<td style="text-align:right;">
+0.0191
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+o_prcp
+</td>
+<td style="text-align:right;">
+216
+</td>
+<td style="text-align:right;">
+0.0191
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+o_wspd
+</td>
+<td style="text-align:right;">
+216
+</td>
+<td style="text-align:right;">
+0.0191
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+d_temp
+</td>
+<td style="text-align:right;">
+771
+</td>
+<td style="text-align:right;">
+0.0680
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+d_prcp
+</td>
+<td style="text-align:right;">
+771
+</td>
+<td style="text-align:right;">
+0.0680
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+d_wspd
+</td>
+<td style="text-align:right;">
+771
+</td>
+<td style="text-align:right;">
+0.0680
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<div id="apply-median-imputation" class="section level3">
+<h3>Apply Median Imputation</h3>
+<pre class="r"><code>df_model &lt;- df_model |&gt;
+  mutate(across(all_of(weather_vars),
+                ~ if_else(is.na(.x),
+                          median(.x, na.rm = TRUE),
+                          .x)))</code></pre>
+</div>
+<div id="after-imputation" class="section level3">
+<h3>After Imputation</h3>
+<pre class="r"><code>df_model |&gt;
+  summarise(across(all_of(weather_vars), ~ sum(is.na(.x)))) |&gt;
+  pivot_longer(everything(),
+               names_to  = &quot;variable&quot;,
+               values_to = &quot;n_missing&quot;) |&gt;
+  kable(caption = &quot;Missing values after imputation (all should be 0).&quot;) |&gt;
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c(&quot;striped&quot;, &quot;hover&quot;))</code></pre>
+<table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Missing values after imputation (all should be 0).
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+variable
+</th>
+<th style="text-align:right;">
+n_missing
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;">
+o_temp
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+o_prcp
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+o_wspd
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+d_temp
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+d_prcp
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+d_wspd
+</td>
+<td style="text-align:right;">
+0
+</td>
+</tr>
+</tbody>
+</table>
+<pre class="r"><code>cat(&quot;Total missing values remaining:&quot;, sum(is.na(df_model)), &quot;\n&quot;)</code></pre>
+<pre><code>## Total missing values remaining: 0</code></pre>
+</div>
+<div id="feature-selection-1" class="section level3">
+<h3>Feature Selection</h3>
+<p>Variables that would cause data leakage or are redundant are removed
+before modelling. Leakage occurs when information that would not be
+available at prediction time is included as a predictor, leading to
+overly optimistic model performance.</p>
+<p>The following variables are excluded:</p>
+<ul>
+<li><code>arr_time</code>, <code>actual_elapsed_time</code>,
+<code>wheels_off</code>, <code>wheels_on</code> — only known after the
+flight lands</li>
+<li><code>is_delayed</code> — derived directly from
+<code>arr_delay</code>, our target variable</li>
+<li><code>route</code> — too many unique combinations;
+<code>origin</code> and <code>dest</code> already capture this</li>
+<li><code>fl_date</code>, <code>crs_dep_time</code> — replaced by
+engineered features <code>dep_hour</code>, <code>day_of_month</code>
+etc</li>
+<li><code>op_carrier_fl_num</code> — individual flight numbers do not
+generalise</li>
+</ul>
+<pre class="r"><code>reg_df &lt;- df_model |&gt;
+  select(
+    arr_delay,                          # target
+    dep_delay, taxi_out, taxi_in,       # operational
+    air_time, crs_elapsed_time,         # schedule
+    dep_hour, time_of_day,              # temporal
+    day_of_month, day_of_week,
+    weekday, is_weekend, year,
+    op_carrier, origin, dest,           # categorical
+    o_temp, o_prcp, o_wspd,             # origin weather
+    d_temp, d_prcp, d_wspd,             # destination weather
+    o_latitude, o_longitude,            # geospatial
+    d_latitude, d_longitude
+  )
+
+cat(&quot;Final dataset for modelling:&quot;, nrow(reg_df), &quot;rows x&quot;, 
+    ncol(reg_df), &quot;columns\n&quot;)</code></pre>
+<pre><code>## Final dataset for modelling: 1133043 rows x 26 columns</code></pre>
+</div>
+<div id="train-test-split" class="section level3">
+<h3>Train / Test Split</h3>
+<p>The dataset is split into 80% training and 20% testing using a random
+sample. A seed is set to ensure reproducibility.</p>
+<pre class="r"><code>set.seed(42)
+
+train_index &lt;- sample(1:nrow(reg_df), size = 0.8 * nrow(reg_df))
+
+reg_train &lt;- reg_df[train_index, ]
+reg_test  &lt;- reg_df[-train_index, ]
+
+cat(&quot;Training set:&quot;, nrow(reg_train), &quot;rows\n&quot;)</code></pre>
+<pre><code>## Training set: 906434 rows</code></pre>
+<pre class="r"><code>cat(&quot;Test set:&quot;, nrow(reg_test), &quot;rows\n&quot;)</code></pre>
+<pre><code>## Test set: 226609 rows</code></pre>
+</div>
+<div id="preprocessing" class="section level3">
+<h3>Preprocessing</h3>
+<p>Categorical variables such as <code>op_carrier</code>,
+<code>origin</code>, <code>dest</code>, <code>time_of_day</code> and
+<code>weekday</code> are converted to numeric using label encoding.
+Boolean and factor variables are also converted to integer for
+compatibility with all three models.</p>
+<pre class="r"><code># Convert categoricals to numeric for all three models
+encode_df &lt;- function(df) {
+  df |&gt;
+    mutate(
+      op_carrier  = as.integer(factor(op_carrier)),
+      origin      = as.integer(factor(origin)),
+      dest        = as.integer(factor(dest)),
+      time_of_day = as.integer(factor(time_of_day)),
+      weekday     = as.integer(factor(weekday)),
+      year        = as.integer(as.character(year)),
+      is_weekend  = as.integer(is_weekend)
+    )
+}
+
+reg_train_enc &lt;- encode_df(reg_train)
+reg_test_enc  &lt;- encode_df(reg_test)
+
+cat(&quot;Any missing values in training set:&quot;, sum(is.na(reg_train_enc)), &quot;\n&quot;)</code></pre>
+<pre><code>## Any missing values in training set: 0</code></pre>
+<pre class="r"><code>cat(&quot;Any missing values in test set:&quot;, sum(is.na(reg_test_enc)), &quot;\n&quot;)</code></pre>
+<pre><code>## Any missing values in test set: 0</code></pre>
+</div>
+</div>
+<div id="scenario-a-pre-departure-prediction-no-dep_delay" class="section level2">
+<h2>4.2.2 Scenario A: Pre-Departure Prediction (No
+<code>dep_delay</code>)</h2>
+<p>In this scenario, only features available <strong>before the flight
+departs</strong> are used. Variables such as <code>dep_delay</code>,
+<code>taxi_out</code>, <code>taxi_in</code>, and <code>air_time</code>
+are excluded because they are only known after the flight has operated.
+This represents a realistic advance-prediction setting.</p>
+<pre class="r"><code>safe_features &lt;- c(
+  &quot;arr_delay&quot;,                        # target
+  &quot;crs_elapsed_time&quot;,                 # scheduled duration
+  &quot;dep_hour&quot;, &quot;day_of_month&quot;,         # temporal
+  &quot;day_of_week&quot;, &quot;is_weekend&quot;, &quot;year&quot;,
+  &quot;op_carrier&quot;, &quot;origin&quot;, &quot;dest&quot;,     # categorical
+  &quot;time_of_day&quot;, &quot;weekday&quot;,
+  &quot;o_temp&quot;, &quot;o_prcp&quot;, &quot;o_wspd&quot;,       # origin weather
+  &quot;d_temp&quot;, &quot;d_prcp&quot;, &quot;d_wspd&quot;,       # destination weather
+  &quot;o_latitude&quot;, &quot;o_longitude&quot;,        # geospatial
+  &quot;d_latitude&quot;, &quot;d_longitude&quot;
+)
+
+reg_train_safe &lt;- reg_train_enc |&gt; select(all_of(safe_features))
+reg_test_safe  &lt;- reg_test_enc  |&gt; select(all_of(safe_features))
+
+cat(&quot;Features used (Scenario A):&quot;, ncol(reg_train_safe) - 1, &quot;\n&quot;)</code></pre>
+<pre><code>## Features used (Scenario A): 21</code></pre>
+<div id="linear-regression-scenario-a" class="section level3">
+<h3>4.2.2.1 Linear Regression — Scenario A</h3>
+<p>Linear Regression serves as the interpretable baseline model. It
+estimates a linear relationship between the available pre-departure
+features and arrival delay. Given the non-linear delay patterns
+identified during EDA, Linear Regression is expected to underperform
+compared to the ensemble approach, but provides a useful performance
+benchmark.</p>
+<pre class="r"><code>lm_model_a &lt;- lm(arr_delay ~ ., data = reg_train_safe)
+
+lm_pred_a &lt;- predict(lm_model_a, newdata = reg_test_safe)
+
+lm_rmse_a &lt;- sqrt(mean((reg_test_safe$arr_delay - lm_pred_a)^2))
+lm_mae_a  &lt;- mean(abs(reg_test_safe$arr_delay - lm_pred_a))
+lm_rsq_a  &lt;- cor(reg_test_safe$arr_delay, lm_pred_a)^2
+
+cat(&quot;Linear Regression (Pre-Departure):\n&quot;)</code></pre>
+<pre><code>## Linear Regression (Pre-Departure):</code></pre>
+<pre class="r"><code>cat(&quot;RMSE:&quot;, round(lm_rmse_a, 3), &quot;\n&quot;)</code></pre>
+<pre><code>## RMSE: 54.135</code></pre>
+<pre class="r"><code>cat(&quot;MAE: &quot;, round(lm_mae_a,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## MAE:  24.06</code></pre>
+<pre class="r"><code>cat(&quot;R²:  &quot;, round(lm_rsq_a,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## R²:   0.018</code></pre>
+</div>
+<div id="random-forest-scenario-a" class="section level3">
+<h3>4.2.2.2 Random Forest — Scenario A</h3>
+<p>Random Forest captures non-linear relationships and feature
+interactions that Linear Regression cannot model. It constructs an
+ensemble of decision trees, each trained on a random subset of data and
+features, with the final prediction averaged across all trees. To manage
+computational resources, the model is trained on a 20% sample of the
+training data with 100 trees.</p>
+<pre class="r"><code>library(ranger)
+
+set.seed(42)
+train_sample_a &lt;- reg_train_safe |&gt; slice_sample(prop = 0.2)
+
+rf_model_a &lt;- ranger(
+  arr_delay ~ .,
+  data          = train_sample_a,
+  num.trees     = 100,
+  mtry          = 5,
+  min.node.size = 20,
+  importance    = &quot;impurity&quot;,
+  seed          = 42
+)
+
+rf_pred_a &lt;- predict(rf_model_a, data = reg_test_safe)$predictions
+
+rf_rmse_a &lt;- sqrt(mean((reg_test_safe$arr_delay - rf_pred_a)^2))
+rf_mae_a  &lt;- mean(abs(reg_test_safe$arr_delay - rf_pred_a))
+rf_rsq_a  &lt;- cor(reg_test_safe$arr_delay, rf_pred_a)^2
+
+cat(&quot;Random Forest (Pre-Departure):\n&quot;)</code></pre>
+<pre><code>## Random Forest (Pre-Departure):</code></pre>
+<pre class="r"><code>cat(&quot;RMSE:&quot;, round(rf_rmse_a, 3), &quot;\n&quot;)</code></pre>
+<pre><code>## RMSE: 52.274</code></pre>
+<pre class="r"><code>cat(&quot;MAE: &quot;, round(rf_mae_a,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## MAE:  22.725</code></pre>
+<pre class="r"><code>cat(&quot;R²:  &quot;, round(rf_rsq_a,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## R²:   0.085</code></pre>
+</div>
+</div>
+<div id="scenario-b-post-departure-prediction" class="section level2">
+<h2>4.2.3 Scenario B: Post-Departure Prediction</h2>
+<p>In Scenario B, features that become available <strong>after the
+flight has departed</strong> are added — specifically
+<code>dep_delay</code>, <code>taxi_out</code>, <code>taxi_in</code>, and
+<code>air_time</code>. This represents a real-time gate-arrival
+estimation setting. As identified in the EDA phase, departure delay
+alone exhibits a correlation of r = 0.97 with arrival delay, and its
+inclusion is expected to substantially improve model performance.</p>
+<pre class="r"><code>post_features &lt;- c(
+  &quot;arr_delay&quot;,                        # target
+  &quot;dep_delay&quot;,                        # key post-departure signal
+  &quot;taxi_out&quot;, &quot;taxi_in&quot;,              # operational (post-departure)
+  &quot;air_time&quot;,                         # in-flight duration
+  &quot;crs_elapsed_time&quot;,                 # scheduled duration
+  &quot;dep_hour&quot;, &quot;day_of_month&quot;,         # temporal
+  &quot;day_of_week&quot;, &quot;is_weekend&quot;, &quot;year&quot;,
+  &quot;op_carrier&quot;, &quot;origin&quot;, &quot;dest&quot;,     # categorical
+  &quot;time_of_day&quot;, &quot;weekday&quot;,
+  &quot;o_temp&quot;, &quot;o_prcp&quot;, &quot;o_wspd&quot;,       # origin weather
+  &quot;d_temp&quot;, &quot;d_prcp&quot;, &quot;d_wspd&quot;,       # destination weather
+  &quot;o_latitude&quot;, &quot;o_longitude&quot;,        # geospatial
+  &quot;d_latitude&quot;, &quot;d_longitude&quot;
+)
+
+reg_train_post &lt;- reg_train_enc |&gt; select(all_of(post_features))
+reg_test_post  &lt;- reg_test_enc  |&gt; select(all_of(post_features))
+
+cat(&quot;Features used (Scenario B):&quot;, ncol(reg_train_post) - 1, &quot;\n&quot;)</code></pre>
+<pre><code>## Features used (Scenario B): 25</code></pre>
+<div id="linear-regression-scenario-b" class="section level3">
+<h3>4.2.3.1 Linear Regression — Scenario B</h3>
+<pre class="r"><code>lm_model_b &lt;- lm(arr_delay ~ ., data = reg_train_post)
+
+lm_pred_b &lt;- predict(lm_model_b, newdata = reg_test_post)
+
+lm_rmse_b &lt;- sqrt(mean((reg_test_post$arr_delay - lm_pred_b)^2))
+lm_mae_b  &lt;- mean(abs(reg_test_post$arr_delay - lm_pred_b))
+lm_rsq_b  &lt;- cor(reg_test_post$arr_delay, lm_pred_b)^2
+
+cat(&quot;Linear Regression (Post-Departure):\n&quot;)</code></pre>
+<pre><code>## Linear Regression (Post-Departure):</code></pre>
+<pre class="r"><code>cat(&quot;RMSE:&quot;, round(lm_rmse_b, 3), &quot;\n&quot;)</code></pre>
+<pre><code>## RMSE: 0.173</code></pre>
+<pre class="r"><code>cat(&quot;MAE: &quot;, round(lm_mae_b,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## MAE:  0.074</code></pre>
+<pre class="r"><code>cat(&quot;R²:  &quot;, round(lm_rsq_b,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## R²:   1</code></pre>
+</div>
+<div id="random-forest-scenario-b" class="section level3">
+<h3>4.2.3.2 Random Forest — Scenario B</h3>
+<pre class="r"><code>set.seed(42)
+train_sample_b &lt;- reg_train_post |&gt; slice_sample(prop = 0.2)
+
+rf_model_b &lt;- ranger(
+  arr_delay ~ .,
+  data          = train_sample_b,
+  num.trees     = 100,
+  mtry          = 5,
+  min.node.size = 20,
+  importance    = &quot;impurity&quot;,
+  seed          = 42
+)
+
+rf_pred_b &lt;- predict(rf_model_b, data = reg_test_post)$predictions
+
+rf_rmse_b &lt;- sqrt(mean((reg_test_post$arr_delay - rf_pred_b)^2))
+rf_mae_b  &lt;- mean(abs(reg_test_post$arr_delay - rf_pred_b))
+rf_rsq_b  &lt;- cor(reg_test_post$arr_delay, rf_pred_b)^2
+
+cat(&quot;Random Forest (Post-Departure):\n&quot;)</code></pre>
+<pre><code>## Random Forest (Post-Departure):</code></pre>
+<pre class="r"><code>cat(&quot;RMSE:&quot;, round(rf_rmse_b, 3), &quot;\n&quot;)</code></pre>
+<pre><code>## RMSE: 16.174</code></pre>
+<pre class="r"><code>cat(&quot;MAE: &quot;, round(rf_mae_b,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## MAE:  7.031</code></pre>
+<pre class="r"><code>cat(&quot;R²:  &quot;, round(rf_rsq_b,  3), &quot;\n&quot;)</code></pre>
+<pre><code>## R²:   0.931</code></pre>
+</div>
+</div>
+<div id="regression-model-comparison" class="section level2">
+<h2>4.2.4 Regression Model Comparison</h2>
+<pre class="r"><code>reg_results &lt;- tibble(
+  Scenario = c(rep(&quot;A: Pre-Departure&quot;,  2),
+               rep(&quot;B: Post-Departure&quot;, 2)),
+  Model    = rep(c(&quot;Linear Regression&quot;, &quot;Random Forest&quot;), 2),
+  RMSE     = c(lm_rmse_a, rf_rmse_a, lm_rmse_b, rf_rmse_b),
+  MAE      = c(lm_mae_a,  rf_mae_a,  lm_mae_b,  rf_mae_b),
+  R2       = c(lm_rsq_a,  rf_rsq_a,  lm_rsq_b,  rf_rsq_b)
+) |&gt;
+  mutate(across(c(RMSE, MAE, R2), ~ round(.x, 3)))
+
+reg_results |&gt;
+  kable(caption  = &quot;Regression model performance across both scenarios.&quot;,
+        col.names = c(&quot;Scenario&quot;, &quot;Model&quot;, &quot;RMSE&quot;, &quot;MAE&quot;, &quot;R²&quot;)) |&gt;
+  kable_styling(full_width = FALSE,
+                bootstrap_options = c(&quot;striped&quot;, &quot;hover&quot;)) |&gt;
+  collapse_rows(columns = 1, valign = &quot;middle&quot;)</code></pre>
+<table class="table table-striped table-hover" style="width: auto !important; margin-left: auto; margin-right: auto;">
+<caption>
+Regression model performance across both scenarios.
+</caption>
+<thead>
+<tr>
+<th style="text-align:left;">
+Scenario
+</th>
+<th style="text-align:left;">
+Model
+</th>
+<th style="text-align:right;">
+RMSE
+</th>
+<th style="text-align:right;">
+MAE
+</th>
+<th style="text-align:right;">
+R²
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align:left;vertical-align: middle !important;" rowspan="2">
+A: Pre-Departure
+</td>
+<td style="text-align:left;">
+Linear Regression
+</td>
+<td style="text-align:right;">
+54.135
+</td>
+<td style="text-align:right;">
+24.060
+</td>
+<td style="text-align:right;">
+0.018
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Random Forest
+</td>
+<td style="text-align:right;">
+52.274
+</td>
+<td style="text-align:right;">
+22.725
+</td>
+<td style="text-align:right;">
+0.085
+</td>
+</tr>
+<tr>
+<td style="text-align:left;vertical-align: middle !important;" rowspan="2">
+B: Post-Departure
+</td>
+<td style="text-align:left;">
+Linear Regression
+</td>
+<td style="text-align:right;">
+0.173
+</td>
+<td style="text-align:right;">
+0.074
+</td>
+<td style="text-align:right;">
+1.000
+</td>
+</tr>
+<tr>
+<td style="text-align:left;">
+Random Forest
+</td>
+<td style="text-align:right;">
+16.174
+</td>
+<td style="text-align:right;">
+7.031
+</td>
+<td style="text-align:right;">
+0.931
+</td>
+</tr>
+</tbody>
+</table>
+<hr />
+</div>
+<div id="saving-regression-models" class="section level2">
+<h2>4.2.5 Saving Regression Models</h2>
+<pre class="r"><code># Scenario A
+saveRDS(lm_model_a, &quot;lm_model_pre.rds&quot;)
+saveRDS(rf_model_a, &quot;rf_model_pre.rds&quot;)
+
+# Scenario B
+saveRDS(lm_model_b, &quot;lm_model_post.rds&quot;)
+saveRDS(rf_model_b, &quot;rf_model_post.rds&quot;)
+
+cat(&quot;All models saved successfully!\n&quot;)</code></pre>
+<pre><code>## All models saved successfully!</code></pre>
+</div>
+<div id="discussion" class="section level2">
+<h2>4.2.6 Discussion</h2>
+<div id="scenario-a-pre-departure" class="section level3">
+<h3>Scenario A — Pre-Departure</h3>
+<p>The low R² values across both pre-departure models reflect the
+inherent difficulty of predicting flight delays using only information
+available before departure. Real-time operational disruptions — such as
+late incoming aircraft and air traffic control intervention — cannot be
+captured by weather and schedule features alone. Weather variables
+showed only weak linear correlations with arrival delay (r ≈ 0.03–0.04)
+during EDA, and features such as carrier, route, and time of day provide
+only a general population-level signal rather than flight-specific
+predictions. Despite modest absolute performance, Random Forest is
+expected to outperform Linear Regression, confirming that delay
+relationships are non-linear in nature — consistent with the non-linear
+weather effects and time-of-day patterns identified during exploratory
+analysis.</p>
+</div>
+<div id="scenario-b-post-departure" class="section level3">
+<h3>Scenario B — Post-Departure</h3>
+<p>The inclusion of <code>dep_delay</code>, <code>taxi_out</code>,
+<code>taxi_in</code>, and <code>air_time</code> is expected to
+substantially improve both RMSE and R² across both models. Departure
+delay in particular acts as a near-direct signal of arrival delay (r =
+0.97, EDA Phase 3), and its inclusion transforms the problem from a weak
+signal estimation task to a high-confidence operational calculation.
+This scenario is appropriate for real-time airline systems estimating
+gate-arrival times once a flight is airborne. The performance gap
+between Scenario A and Scenario B directly quantifies the informational
+value of post-departure operational data.</p>
+</div>
+</div>
 </div>
 <div id="references" class="section level1">
 <h1>References</h1>
@@ -4847,16 +6489,14 @@ accessed June 2026.</li>
 ##  [1] sass_0.4.10        generics_0.1.4     xml2_1.5.2         stringi_1.8.7     
 ##  [5] hms_1.1.4          digest_0.6.39      magrittr_2.0.4     evaluate_1.0.5    
 ##  [9] grid_4.5.2         timechange_0.4.0   RColorBrewer_1.1-3 fastmap_1.2.0     
-## [13] jsonlite_2.0.0     viridisLite_0.4.3  codetools_0.2-20   textshaping_1.0.5 
-## [17] jquerylib_0.1.4    cli_3.6.6          crayon_1.5.3       rlang_1.2.0       
-## [21] bit64_4.8.0        base64enc_0.1-6    withr_3.0.2        repr_1.1.7        
-## [25] cachem_1.1.0       yaml_2.3.12        parallel_4.5.2     tools_4.5.2       
-## [29] tzdb_0.5.0         vctrs_0.7.1        R6_2.6.1           lifecycle_1.0.5   
-## [33] snakecase_0.11.1   bit_4.6.0          vroom_1.7.1        pkgconfig_2.0.3   
-## [37] pillar_1.11.1      bslib_0.10.0       gtable_0.3.6       glue_1.8.0        
-## [41] systemfonts_1.3.2  haven_2.5.5        xfun_0.56          tidyselect_1.2.1  
-## [45] rstudioapi_0.18.0  farver_2.1.2       htmltools_0.5.9    labeling_0.4.3    
-## [49] rmarkdown_2.30     svglite_2.2.2      compiler_4.5.2     S7_0.2.1</code></pre>
+## [13] jsonlite_2.0.0     viridisLite_0.4.3  textshaping_1.0.5  jquerylib_0.1.4   
+## [17] cli_3.6.6          rlang_1.2.0        base64enc_0.1-6    withr_3.0.2       
+## [21] repr_1.1.7         cachem_1.1.0       yaml_2.3.12        tools_4.5.2       
+## [25] tzdb_0.5.0         vctrs_0.7.1        R6_2.6.1           lifecycle_1.0.5   
+## [29] snakecase_0.11.1   pkgconfig_2.0.3    pillar_1.11.1      bslib_0.10.0      
+## [33] gtable_0.3.6       glue_1.8.0         systemfonts_1.3.2  xfun_0.56         
+## [37] tidyselect_1.2.1   rstudioapi_0.18.0  farver_2.1.2       htmltools_0.5.9   
+## [41] rmarkdown_2.30     svglite_2.2.2      compiler_4.5.2     S7_0.2.1</code></pre>
 </div>
 
 

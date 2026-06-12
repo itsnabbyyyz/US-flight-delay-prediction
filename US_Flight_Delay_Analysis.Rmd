@@ -414,6 +414,7 @@ Data transformation produced an analysis-ready dataset while preserving all flig
 ```{r}
 saveRDS(df_clean, "df_clean.rds")
 ```
+
 ---
 
 # Phase 3: Exploratory Data Analysis
@@ -758,9 +759,6 @@ modelA_df <- df_clean %>%
   select(
     is_delayed,
     op_carrier,
-    origin,
-    dest,
-    route,
     day_of_month,
     day_of_week,
     year,
@@ -812,12 +810,6 @@ train_data <- train_data %>%
 
 test_data <- test_data %>%
   mutate(across(where(is.character), as.factor))
-
-train_data <- train_data %>%
-  select(-route)
-
-test_data <- test_data %>%
-  select(-route)
 
 train_data$is_weekend <- as.factor(train_data$is_weekend)
 test_data$is_weekend  <- as.factor(test_data$is_weekend)
@@ -899,7 +891,7 @@ log_cm <- confusionMatrix(
 
 log_cm
 ```
-Logistic Regression Model A achieved an accuracy of 82.28%. However, despite the relatively high accuracy, the model performed poorly in identifying delayed flights, achieving a recall of only 1.00%. In contrast, specificity reached 99.82%, indicating that the model primarily predicted the majority class (OnTime). This behaviour is reflected in the low balanced accuracy (50.41%) and Cohen's Kappa (0.0134). Overall, Logistic Regression Model A served as a useful baseline but was ineffective for detecting flight delays in this dataset.
+Logistic Regression Model A achieved an accuracy of 82.27%. However, despite the relatively high accuracy, the model performed poorly in identifying delayed flights, achieving a recall of only 0.68%. In contrast, specificity reached 99.89%, indicating that the model primarily predicted the majority class (OnTime). This behaviour is reflected in the low balanced accuracy (50.28%) and Cohen's Kappa (0.0093). Overall, Logistic Regression Model A served as a useful baseline but was ineffective for detecting flight delays in this dataset.
 
 ## 4.1.3 Random Forest – Model A
 
@@ -918,7 +910,7 @@ rf_model <- ranger(
   is_delayed ~ .,
   data = train_data,
   num.trees = 200,
-  probability = FALSE,
+  probability = TRUE,
   importance = "impurity",
   seed = 123
 )
@@ -981,9 +973,9 @@ rf_cm <- confusionMatrix(
 rf_cm
 ```
 
-Random Forest Model A achieved an accuracy of 84.19%, outperforming Logistic Regression Model A (82.28%). The model recorded a precision of 69.10% and a recall of 19.78%, demonstrating a substantially improved ability to identify delayed flights compared to Logistic Regression, which achieved a recall of only 1.00%.
+Random Forest Model A achieved an accuracy of 84.17%, outperforming Logistic Regression Model A (82.27%). The model recorded a precision of 68.23% and a recall of 20.25%, demonstrating a substantially improved ability to identify delayed flights compared to Logistic Regression, which achieved a recall of only 0.68%.
 
-The balanced accuracy increased to 58.94%, indicating improved performance across both classes while maintaining high specificity (98.09%). These results suggest that Random Forest was better able to capture nonlinear relationships and interactions among operational, temporal, geographical, and weather-related variables, resulting in superior classification performance when departure delay information was excluded.
+The balanced accuracy increased to 59.11%, indicating improved performance across both classes while maintaining high specificity (97.96%). These results suggest that Random Forest was better able to capture nonlinear relationships and interactions among operational, temporal, geographical, and weather-related variables, resulting in superior classification performance when departure delay information was excluded.
 
 ## 4.1.4 Logistic Regression – Model B
 
@@ -1007,8 +999,6 @@ modelB_df <- df_clean %>%
     dep_delay,
 
     op_carrier,
-    origin,
-    dest,
 
     day_of_month,
     day_of_week,
@@ -1135,9 +1125,9 @@ log_cm_B <- confusionMatrix(
 
 log_cm_B
 ```
-Model B achieved an accuracy of 93.42%, substantially improving upon Logistic Regression Model A (82.28%). The inclusion of departure delay provided significant predictive power, enabling the model to better distinguish between delayed and on-time flights.
+Model B achieved an accuracy of 93.39%, substantially improving upon Logistic Regression Model A (82.27%). The inclusion of departure delay provided significant predictive power, enabling the model to better distinguish between delayed and on-time flights.
 
-The model achieved a recall of 71.35% and a precision of 89.43%, indicating strong performance in identifying delayed flights while maintaining a low rate of false positives. Specificity remained high at 98.18%, demonstrating excellent performance in correctly classifying on-time flights. The balanced accuracy of 84.76% and Cohen's Kappa of 0.7551 further indicate strong classification performance across both classes.
+The model achieved a recall of 71.23% and a precision of 89.37%, indicating strong performance in identifying delayed flights while maintaining a low rate of false positives. Specificity remained high at 98.17%, demonstrating excellent performance in correctly classifying on-time flights. The balanced accuracy of 84.70% and Cohen's Kappa of 0.7540 further indicate strong classification performance across both classes.
 
 Compared with Model A, the substantial improvement in recall confirms that departure delay is a highly influential predictor of arrival delay. These findings suggest that incorporating real-time operational information significantly enhances flight delay prediction performance.
 
@@ -1226,9 +1216,9 @@ rf_cm_B
 
 Random Forest Model B was developed using the same feature set as Model A, with the addition of departure delay (dep_delay). By incorporating this operational variable, the model was able to capture both nonlinear relationships and real-time flight conditions that influence arrival delays.
 
-The model achieved an accuracy of 93.93%, representing the highest classification performance among all models evaluated. It also achieved a precision of 91.07% and a recall of 72.96%, indicating strong performance in identifying delayed flights while maintaining a low false-positive rate. Furthermore, the model achieved a specificity of 98.46%, demonstrating excellent performance in correctly classifying on-time flights. The balanced accuracy of 85.71% and Cohen's Kappa value of 0.7745 further confirm strong classification performance across both classes.
+The model achieved an accuracy of 93.97%, representing the highest classification performance among all models evaluated. It also achieved a precision of 91.24% and a recall of 73.03%, indicating strong performance in identifying delayed flights while maintaining a low false-positive rate. Furthermore, the model achieved a specificity of 98.49%, demonstrating excellent performance in correctly classifying on-time flights. The balanced accuracy of 85.76% and Cohen's Kappa value of 0.7758 further confirm strong classification performance across both classes.
 
-Compared with Logistic Regression Model B, Random Forest Model B produced slightly higher accuracy, recall, balanced accuracy, and Kappa, suggesting that nonlinear relationships and feature interactions contribute additional predictive value beyond what can be captured by a linear model. The results indicate that combining operational, temporal, route, weather, and departure delay information with an ensemble learning approach provides the most effective solution for flight delay classification in this study.
+Compared with Logistic Regression Model B, Random Forest Model B produced slightly higher accuracy, recall, balanced accuracy, and Kappa, suggesting that nonlinear relationships and feature interactions contribute additional predictive value beyond what can be captured by a linear model. The results indicate that combining operational, temporal, geographical (coordinates), weather, and departure delay information with an ensemble learning approach provides the most effective solution for flight delay classification in this study.
 
 ## 4.1.6 Classification Model Comparison
 
@@ -1251,7 +1241,7 @@ knitr::kable(
   caption = "Classification Model Performance Comparison"
 )
 ```
-Among the four classification models evaluated, Random Forest Model B achieved the best overall performance, with an accuracy of 93.93%, recall of 72.96%, specificity of 98.46%, and balanced accuracy of 85.71%. The inclusion of departure delay substantially improved predictive performance across both Logistic Regression and Random Forest models, highlighting its importance as a predictor of arrival delays.
+Among the four classification models evaluated, Random Forest Model B achieved the best overall performance, with an accuracy of 93.97%, recall of 73.03%, specificity of 98.49%, and balanced accuracy of 85.76%. The inclusion of departure delay substantially improved predictive performance across both Logistic Regression and Random Forest models, highlighting its importance as a predictor of arrival delays.
 
 Overall, Random Forest models consistently outperformed Logistic Regression models, suggesting that nonlinear relationships and interactions among operational, temporal, geographical, and weather-related variables contribute to flight delay outcomes. Consequently, Random Forest Model B was selected as the best-performing classification model for flight delay prediction.
 
@@ -1286,7 +1276,7 @@ The cleaned dataset saved during Phase 2 is loaded directly, ensuring consistenc
 The cleaned dataset produced in Phase 2 is loaded. It contains 1,133,043 flight records with missing values confined to the six weather variables.
 
 ```{r load-data}
-df_model <- readRDS("cleaned_flights.rds")
+df_model <- readRDS("df_clean.rds")
 
 cat("Rows:", nrow(df_model), "\n")
 cat("Columns:", ncol(df_model), "\n")
@@ -1573,7 +1563,9 @@ reg_results |>
                 bootstrap_options = c("striped", "hover")) |>
   collapse_rows(columns = 1, valign = "middle")
 ```
+
 ---
+
 ## 4.2.5 Saving Regression Models
 
 ```{r save-models}
