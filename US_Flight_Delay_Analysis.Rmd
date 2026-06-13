@@ -1131,7 +1131,7 @@ The model achieved a recall of 71.23% and a precision of 89.37%, indicating stro
 
 Compared with Model A, the substantial improvement in recall confirms that departure delay is a highly influential predictor of arrival delay. These findings suggest that incorporating real-time operational information significantly enhances flight delay prediction performance.
 
-## 4.1.4 Random Forest – Model B
+## 4.1.5 Random Forest – Model B
 
 Random Forest Model B was developed using the same predictors as Random Forest Model A, with the addition of departure delay (dep_delay). The inclusion of departure delay allows the model to incorporate real-time operational information that may influence a flight's final arrival status.
 
@@ -1230,16 +1230,41 @@ comparison_table <- data.frame(
     "Logistic Regression B",
     "Random Forest B"
   ),
-  Accuracy = c(82.28, 84.19, 93.42, 93.93),
-  Recall = c(1.00, 19.78, 71.35, 72.96),
-  Specificity = c(99.82, 98.09, 98.18, 98.46),
-  Balanced_Accuracy = c(50.41, 58.94, 84.76, 85.71)
+
+  Accuracy = round(c(
+    log_cm$overall["Accuracy"],
+    rf_cm$overall["Accuracy"],
+    log_cm_B$overall["Accuracy"],
+    rf_cm_B$overall["Accuracy"]
+  ) * 100, 2),
+
+  Recall = round(c(
+    log_cm$byClass["Sensitivity"],
+    rf_cm$byClass["Sensitivity"],
+    log_cm_B$byClass["Sensitivity"],
+    rf_cm_B$byClass["Sensitivity"]
+  ) * 100, 2),
+
+  Specificity = round(c(
+    log_cm$byClass["Specificity"],
+    rf_cm$byClass["Specificity"],
+    log_cm_B$byClass["Specificity"],
+    rf_cm_B$byClass["Specificity"]
+  ) * 100, 2),
+
+  Balanced_Accuracy = round(c(
+    log_cm$byClass["Balanced Accuracy"],
+    rf_cm$byClass["Balanced Accuracy"],
+    log_cm_B$byClass["Balanced Accuracy"],
+    rf_cm_B$byClass["Balanced Accuracy"]
+  ) * 100, 2)
 )
 
 knitr::kable(
   comparison_table,
   caption = "Classification Model Performance Comparison"
 )
+```
 ```
 Among the four classification models evaluated, Random Forest Model B achieved the best overall performance, with an accuracy of 93.97%, recall of 73.03%, specificity of 98.49%, and balanced accuracy of 85.76%. The inclusion of departure delay substantially improved predictive performance across both Logistic Regression and Random Forest models, highlighting its importance as a predictor of arrival delays.
 
