@@ -3279,8 +3279,8 @@ original variables plus an engineered <code>year</code> column).</p>
   Category = c(&quot;Flight Identification&quot;, &quot;Temporal&quot;, &quot;Delay / Operational&quot;,
                &quot;Weather (Origin)&quot;, &quot;Weather (Destination)&quot;, &quot;Geospatial&quot;),
   Variables = c(
-    &quot;op_carrier, op_carrier_fl_num, origin, dest&quot;,
-    &quot;fl_date, crs_dep_time, dep_time, crs_arr_time, arr_time, month, day_of_month, day_of_week&quot;,
+    &quot;op_carrier, op_carrier_fl_num, origin, dest, origin_index, dest_index&quot;,
+    &quot;fl_date, crs_dep_time, dep_time, crs_arr_time, arr_time, month, day_of_month, day_of_week, year&quot;,
     &quot;dep_delay, arr_delay, taxi_out, taxi_in, air_time, crs_elapsed_time, actual_elapsed_time, wheels_off, wheels_on, flights&quot;,
     &quot;o_temp, o_prcp, o_wspd&quot;,
     &quot;d_temp, d_prcp, d_wspd&quot;,
@@ -3311,7 +3311,7 @@ Variables
 Flight Identification
 </td>
 <td style="text-align:left;">
-op_carrier, op_carrier_fl_num, origin, dest
+op_carrier, op_carrier_fl_num, origin, dest, origin_index, dest_index
 </td>
 </tr>
 <tr>
@@ -3320,7 +3320,7 @@ Temporal
 </td>
 <td style="text-align:left;">
 fl_date, crs_dep_time, dep_time, crs_arr_time, arr_time, month,
-day_of_month, day_of_week
+day_of_month, day_of_week, year
 </td>
 </tr>
 <tr>
@@ -4430,10 +4430,11 @@ Delayed
 are on time or early, resulting in a moderately imbalanced dataset.
 Although the imbalance is not extreme, it is sufficient to make accuracy
 an unreliable performance measure, as a naive model could achieve high
-accuracy by predicting all flights as on time. Consequently, future
-classification models should be evaluated using metrics such as balanced
-accuracy, precision, recall, F1-score, and ROC-AUC, with appropriate
-imbalance-handling techniques considered during model development.</p>
+accuracy by predicting all flights as on time. Consequently,
+classification models are evaluated using metrics such as balanced
+accuracy, precision, recall, specificity, and Cohen’s Kappa, which
+remain informative under class imbalance rather than relying on accuracy
+alone.</p>
 </div>
 <div id="univariate-analysis" class="section level2">
 <h2>3.2 Univariate Analysis</h2>
@@ -6451,8 +6452,8 @@ value of post-departure operational data.</p>
 </div>
 </div>
 </div>
-<div id="phase-5-model-evaluation" class="section level1">
-<h1>Phase 5: Model Evaluation</h1>
+<div id="phase-5-evaluation-comparison" class="section level1">
+<h1>Phase 5: Evaluation &amp; Comparison</h1>
 <p>This section evaluates the modelling results across both prediction
 scenarios. Instead of reviewing each model separately, the focus is on
 comparing how model performance changes when moving from Scenario A,
