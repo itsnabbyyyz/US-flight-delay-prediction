@@ -4821,9 +4821,8 @@ taxi times, and air time. This represents a gate-arrival estimation
 setting once the flight is airborne.</li>
 </ul>
 <hr />
-</div>
-<div id="classification-modelling" class="section level1">
-<h1>4.1 Classification Modelling</h1>
+<div id="classification-modelling" class="section level2">
+<h2>4.1 Classification Modelling</h2>
 <p>The objective of the classification task is to predict whether a
 flight will arrive on time or experience a significant arrival delay. A
 binary target variable, is_delayed, was created from arrival delay,
@@ -5000,6 +4999,7 @@ str(train_data)</code></pre>
 ##  $ o_longitude : num [1:906433] -92.2 -92.2 -92.2 -92.2 -92.2 ...
 ##  $ d_latitude  : num [1:906433] 44.9 44.9 44.9 44.9 44.9 ...
 ##  $ d_longitude : num [1:906433] -93.2 -93.2 -93.2 -93.2 -93.2 ...</code></pre>
+</div>
 </div>
 </div>
 <div id="logistic-regression-model-a" class="section level2">
@@ -5194,9 +5194,9 @@ rf_model &lt;- ranger(
   importance = &quot;impurity&quot;,
   seed = 123
 )</code></pre>
-<pre><code>## Growing trees.. Progress: 31%. Estimated remaining time: 1 minute, 10 seconds.
-## Growing trees.. Progress: 61%. Estimated remaining time: 40 seconds.
-## Growing trees.. Progress: 91%. Estimated remaining time: 9 seconds.</code></pre>
+<pre><code>## Growing trees.. Progress: 29%. Estimated remaining time: 1 minute, 15 seconds.
+## Growing trees.. Progress: 58%. Estimated remaining time: 44 seconds.
+## Growing trees.. Progress: 87%. Estimated remaining time: 13 seconds.</code></pre>
 <pre class="r"><code>rf_model</code></pre>
 <pre><code>## Ranger result
 ## 
@@ -5602,8 +5602,8 @@ rf_model_B &lt;- ranger(
   importance = &quot;impurity&quot;,
   seed = 123
 )</code></pre>
-<pre><code>## Growing trees.. Progress: 36%. Estimated remaining time: 56 seconds.
-## Growing trees.. Progress: 72%. Estimated remaining time: 24 seconds.</code></pre>
+<pre><code>## Growing trees.. Progress: 34%. Estimated remaining time: 1 minute, 0 seconds.
+## Growing trees.. Progress: 69%. Estimated remaining time: 28 seconds.</code></pre>
 <pre class="r"><code>rf_model_B</code></pre>
 <pre><code>## Ranger result
 ## 
@@ -5787,9 +5787,8 @@ Consequently, Random Forest Model B was selected as the best-performing
 classification model for flight delay prediction.</p>
 <hr />
 </div>
-</div>
-<div id="regression-modelling" class="section level1">
-<h1>4.2 Regression Modelling</h1>
+<div id="regression-modelling" class="section level2">
+<h2>4.2 Regression Modelling</h2>
 <p>The regression task predicts the <strong>exact arrival delay duration
 in minutes</strong> (<code>arr_delay</code>).</p>
 <p>Two algorithms are evaluated in order of increasing complexity:</p>
@@ -5827,6 +5826,7 @@ capturing non-linear interactions</li>
 </tbody>
 </table>
 <hr />
+</div>
 <div id="data-preparation" class="section level2">
 <h2>4.2.1 Data Preparation</h2>
 <div id="loading-the-dataset" class="section level3">
@@ -6451,8 +6451,8 @@ value of post-departure operational data.</p>
 </div>
 </div>
 </div>
-<div id="phase-5-model-evaluation-and-comparison" class="section level1">
-<h1>Phase 5: Model Evaluation and Comparison</h1>
+<div id="phase-5-model-evaluation" class="section level1">
+<h1>Phase 5: Model Evaluation</h1>
 <p>This section evaluates the modelling results across both prediction
 scenarios. Instead of reviewing each model separately, the focus is on
 comparing how model performance changes when moving from Scenario A,
@@ -6873,6 +6873,36 @@ model depends on the intended use case: advance planning or real-time
 operational prediction.</p>
 <hr />
 </div>
+</div>
+<div id="conclusion" class="section level1">
+<h1>Conclusion</h1>
+<p>This project investigated U.S. domestic flight delays during the
+December holiday periods of 2023 and 2024 using the Aeolus dataset,
+which contains over 1.13 million flight records enriched with
+operational, temporal, weather, and airport-related information. Both
+classification and regression approaches were developed and evaluated to
+better understand the factors associated with flight delays and to
+assess the feasibility of predicting them.</p>
+<p>The results consistently showed that operational information is the
+strongest driver of arrival delay, with departure delay emerging as the
+single most influential predictor. For the classification task, Random
+Forest achieved the best overall performance, reaching <strong>94.0%
+accuracy, 73.0% recall, and 85.8% balanced accuracy</strong>. For the
+regression task, the best-performing Random Forest model achieved an
+<strong>RMSE of approximately 16 minutes and an R² of 0.93</strong>,
+demonstrating strong predictive capability once post-departure
+information becomes available.</p>
+<p>A key finding of this study is the clear trade-off between prediction
+timing and predictive accuracy. While pre-departure models provide
+useful insights for advance planning and resource allocation, their
+predictive power remains limited. In contrast, post-departure models
+achieve substantially higher accuracy by leveraging real-time
+operational information.</p>
+<p>Overall, the findings demonstrate the value of machine learning for
+flight-delay prediction and provide practical insights that can support
+both advance planning and real-time operational decision-making within
+the aviation industry.</p>
+<hr />
 </div>
 <div id="references" class="section level1">
 <h1>References</h1>

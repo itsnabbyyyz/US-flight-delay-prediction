@@ -55,7 +55,7 @@ p, li {
 }
 ```
 
----
+***
 
 # Phase 1: Introduction
 
@@ -63,7 +63,7 @@ Flight delays remain a persistent challenge in the U.S. aviation industry, causi
 
 The project has two main analytical components. First, exploratory data analysis is conducted to understand delay patterns, weather impacts, and year-over-year trends. Second, predictive models are developed for two complementary tasks: a regression task to predict exact arrival delay in minutes, and a classification task to predict whether a flight will experience a significant delay exceeding 15 minutes. All analyses are implemented using the tidymodels framework in R.
 
----
+***
 
 ## 1.1 Background
 
@@ -71,7 +71,7 @@ Flight delays increase substantially during the December holiday season due to h
 
 The Aeolus dataset provides a comprehensive foundation for this analysis by combining flight operations, weather conditions, and airport information within a single dataset. This integration enables the joint examination of operational and environmental factors, allowing a more complete assessment of the drivers of flight delays.
 
----
+***
 
 ## 1.2 Problem Statement
 
@@ -79,7 +79,7 @@ Flight delays cost the U.S. economy billions of dollars annually, yet accurately
 
 Existing research has rarely compared regression and classification approaches on a unified dataset with integrated weather features. Furthermore, delay pattern changes between consecutive holiday seasons remain underexplored. This project addresses these gaps by leveraging the Aeolus dataset to simultaneously investigate both predictive paradigms while focusing specifically on December 2023 and 2024.
 
----
+***
 
 ## 1.3 Objectives
 
@@ -92,7 +92,7 @@ The objectives of this project are as follows:
 5. To identify the most influential predictors of flight delays through feature importance analysis.
 6. To compare the performance of regression versus classification approaches for delay prediction.
 
----
+***
 
 ## 1.4 Research Questions
 
@@ -102,7 +102,7 @@ The objectives of this project are as follows:
 4. How does a regression model compare to a classification model in predicting flight delays?
 5. Can a binary classification model accurately identify flights delayed more than 15 minutes?
 
----
+***
 
 # Phase 2: Data Preparation
 
@@ -153,7 +153,7 @@ tibble(
 
 The **target variables** for modelling stage are `arr_delay` for regression and is_delayed (`arr_delay > 15`) minutes for classification.
 
----
+***
 
 ## 2.4 Data Loading and Filtering
 
@@ -268,7 +268,7 @@ skim(df) |> yank("numeric")
 
 The dataset is highly complete, with all core flight and delay variables fully populated. Missing values are limited to a small number of weather-related variables and are examined separately. Preliminary statistics also indicate that departure and arrival delays are strongly right-skewed, with most flights departing and arriving on time or early, but a small number experiencing extremely large delays. This distributional pattern has important implications for subsequent modelling and evaluation.
 
----
+***
 
 ## 2.6 Data Cleaning
 
@@ -415,7 +415,7 @@ Data transformation produced an analysis-ready dataset while preserving all flig
 saveRDS(df_clean, "df_clean.rds")
 ```
 
----
+***
 
 # Phase 3: Exploratory Data Analysis
 
@@ -681,7 +681,7 @@ df_clean |>
 Delay rates vary throughout the month, with the highest levels occurring during the late-December holiday travel period. This pattern suggests that holiday-related travel demand is a key contributor to flight delays, while early December remains comparatively less congested. The findings indicate that day-of-month effects contain meaningful predictive information and should be considered in subsequent modelling.
 
 
----
+***
 
 # Phase 4: Modelling
 
@@ -695,9 +695,9 @@ Both objectives are evaluated under two modelling scenarios:
 - **Scenario A (Pre-Departure):** Uses only features available before the flight departs — such as scheduled times, carrier, route, and weather forecasts. This represents a realistic advance-prediction setting applicable at the time of booking or check-in.
 - **Scenario B (Post-Departure):** Adds real-time operational features such as departure delay (`dep_delay`), taxi times, and air time. This represents a gate-arrival estimation setting once the flight is airborne.
 
----
+***
 
-# 4.1 Classification Modelling
+## 4.1 Classification Modelling
 
 The objective of the classification task is to predict whether a flight will arrive on time or experience a significant arrival delay. A binary target variable, is_delayed, was created from arrival delay, where flights arriving more than 15 minutes late were classified as Delayed and all others as OnTime.
 
@@ -1245,9 +1245,9 @@ Among the four classification models evaluated, Random Forest Model B achieved t
 
 Overall, Random Forest models consistently outperformed Logistic Regression models, suggesting that nonlinear relationships and interactions among operational, temporal, geographical, and weather-related variables contribute to flight delay outcomes. Consequently, Random Forest Model B was selected as the best-performing classification model for flight delay prediction.
 
----
+***
 
-# 4.2 Regression Modelling
+## 4.2 Regression Modelling
 
 The regression task predicts the **exact arrival delay duration in minutes** (`arr_delay`). 
 
@@ -1263,7 +1263,7 @@ Both models are trained and evaluated under two scenarios:
 | **A — Pre-Departure** | Schedule, carrier, route, weather forecast | Prediction at booking or check-in |
 | **B — Post-Departure** | Above + `dep_delay`, taxi times, air time | Real-time gate-arrival estimation |
 
----
+***
 
 ## 4.2.1 Data Preparation
 
@@ -1564,7 +1564,7 @@ reg_results |>
   collapse_rows(columns = 1, valign = "middle")
 ```
 
----
+***
 
 ## 4.2.5 Saving Regression Models
 
@@ -1589,8 +1589,8 @@ The low R² values across both pre-departure models reflect the inherent difficu
 
 The inclusion of `dep_delay`, `taxi_out`, `taxi_in`, and `air_time` is expected to substantially improve both RMSE and R² across both models. Departure delay in particular acts as a near-direct signal of arrival delay (r = 0.97, EDA Phase 3), and its inclusion transforms the problem from a weak signal estimation task to a high-confidence operational calculation. This scenario is appropriate for real-time airline systems estimating gate-arrival times once a flight is airborne. The performance gap between Scenario A and Scenario B directly quantifies the informational value of post-departure operational data.
 
----
-# Phase 5: Model Evaluation and Comparison
+***
+# Phase 5: Model Evaluation
 
 This section evaluates the modelling results across both prediction scenarios. Instead of reviewing each model separately, the focus is on comparing how model performance changes when moving from Scenario A, which uses only pre-departure information, to Scenario B, which includes post-departure operational information.
 
@@ -1736,7 +1736,19 @@ For classification, Random Forest Model B was the strongest model because it ach
 
 The comparison also highlights an important practical distinction. Scenario A is more useful for early prediction before departure, but its accuracy is limited. Scenario B is much more accurate, but it can only be used after the flight has already departed. Therefore, the preferred model depends on the intended use case: advance planning or real-time operational prediction.
 
----
+***
+
+# Conclusion
+
+This project investigated U.S. domestic flight delays during the December holiday periods of 2023 and 2024 using the Aeolus dataset, which contains over 1.13 million flight records enriched with operational, temporal, weather, and airport-related information. Both classification and regression approaches were developed and evaluated to better understand the factors associated with flight delays and to assess the feasibility of predicting them.
+
+The results consistently showed that operational information is the strongest driver of arrival delay, with departure delay emerging as the single most influential predictor. For the classification task, Random Forest achieved the best overall performance, reaching **94.0% accuracy, 73.0% recall, and 85.8% balanced accuracy**. For the regression task, the best-performing Random Forest model achieved an **RMSE of approximately 16 minutes and an R² of 0.93**, demonstrating strong predictive capability once post-departure information becomes available.
+
+A key finding of this study is the clear trade-off between prediction timing and predictive accuracy. While pre-departure models provide useful insights for advance planning and resource allocation, their predictive power remains limited. In contrast, post-departure models achieve substantially higher accuracy by leveraging real-time operational information.
+
+Overall, the findings demonstrate the value of machine learning for flight-delay prediction and provide practical insights that can support both advance planning and real-time operational decision-making within the aviation industry.
+
+***
 
 # References
 
@@ -1745,7 +1757,7 @@ The comparison also highlights an important practical distinction. Scenario A is
 - *Aeolus — A Multi-Modal Flight Delay Dataset* (https://www.kaggle.com/datasets/flnny123/mfddmulti-modal-flight-delay-dataset/versions/3/data), accessed June 2026.
 
 
----
+***
 
 ```{r session-info, cache=FALSE}
 sessionInfo()
