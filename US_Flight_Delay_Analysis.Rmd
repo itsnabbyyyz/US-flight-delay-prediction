@@ -137,8 +137,8 @@ tibble(
   Category = c("Flight Identification", "Temporal", "Delay / Operational",
                "Weather (Origin)", "Weather (Destination)", "Geospatial"),
   Variables = c(
-    "op_carrier, op_carrier_fl_num, origin, dest",
-    "fl_date, crs_dep_time, dep_time, crs_arr_time, arr_time, month, day_of_month, day_of_week",
+    "op_carrier, op_carrier_fl_num, origin, dest, origin_index, dest_index",
+    "fl_date, crs_dep_time, dep_time, crs_arr_time, arr_time, month, day_of_month, day_of_week, year",
     "dep_delay, arr_delay, taxi_out, taxi_in, air_time, crs_elapsed_time, actual_elapsed_time, wheels_off, wheels_on, flights",
     "o_temp, o_prcp, o_wspd",
     "d_temp, d_prcp, d_wspd",
@@ -442,7 +442,7 @@ ggplot(target_tab, aes(is_delayed, n, fill = is_delayed)) +
   theme(legend.position = "none")
 ```
 
-Approximately 17.8% of flights are classified as delayed, while 82.2% are on time or early, resulting in a moderately imbalanced dataset. Although the imbalance is not extreme, it is sufficient to make accuracy an unreliable performance measure, as a naive model could achieve high accuracy by predicting all flights as on time. Consequently, future classification models should be evaluated using metrics such as balanced accuracy, precision, recall, F1-score, and ROC-AUC, with appropriate imbalance-handling techniques considered during model development.
+Approximately 17.8% of flights are classified as delayed, while 82.2% are on time or early, resulting in a moderately imbalanced dataset. Although the imbalance is not extreme, it is sufficient to make accuracy an unreliable performance measure, as a naive model could achieve high accuracy by predicting all flights as on time. Consequently, classification models are evaluated using metrics such as balanced accuracy, precision, recall, specificity, and Cohen's Kappa, which remain informative under class imbalance rather than relying on accuracy alone.
 
 ## 3.2 Univariate Analysis
 
@@ -1590,7 +1590,7 @@ The low R² values across both pre-departure models reflect the inherent difficu
 The inclusion of `dep_delay`, `taxi_out`, `taxi_in`, and `air_time` is expected to substantially improve both RMSE and R² across both models. Departure delay in particular acts as a near-direct signal of arrival delay (r = 0.97, EDA Phase 3), and its inclusion transforms the problem from a weak signal estimation task to a high-confidence operational calculation. This scenario is appropriate for real-time airline systems estimating gate-arrival times once a flight is airborne. The performance gap between Scenario A and Scenario B directly quantifies the informational value of post-departure operational data.
 
 ***
-# Phase 5: Model Evaluation
+# Phase 5: Evaluation & Comparison
 
 This section evaluates the modelling results across both prediction scenarios. Instead of reviewing each model separately, the focus is on comparing how model performance changes when moving from Scenario A, which uses only pre-departure information, to Scenario B, which includes post-departure operational information.
 
